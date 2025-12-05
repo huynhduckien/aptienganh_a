@@ -1,7 +1,11 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// The define plugin in vite.config.ts replaces this with the actual string value during build.
+// This prevents "process is not defined" errors and aligns with GenAI SDK guidelines.
+const API_KEY = process.env.API_KEY || "";
+
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 // Switch to Flash Lite as requested to mitigate quota issues
 const MODEL_NAME = "gemini-flash-lite-latest";
@@ -175,6 +179,8 @@ export const generateLessonForChunk = async (textChunk: string): Promise<LessonC
   `;
 
   try {
+      if (!API_KEY) throw new Error("Missing API Key");
+
       return await withRetry(async () => {
         const response = await ai.models.generateContent({
             model: MODEL_NAME,
@@ -243,6 +249,8 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
     };
 
     try {
+        if (!API_KEY) throw new Error("Missing API Key");
+
         const result = await withRetry(async () => {
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
