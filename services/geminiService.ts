@@ -1,11 +1,7 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
 
-// The define plugin in vite.config.ts replaces this with the actual string value during build.
-// This prevents "process is not defined" errors and aligns with GenAI SDK guidelines.
-const API_KEY = process.env.API_KEY || "";
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Switch to Flash Lite as requested to mitigate quota issues
 const MODEL_NAME = "gemini-flash-lite-latest";
@@ -119,10 +115,10 @@ const lessonSchema: Schema = {
 // Fallback Data Generators
 const getFallbackLesson = (text: string): LessonContent => ({
     cleanedSourceText: text,
-    referenceTranslation: "[LỖI KẾT NỐI] Không thể kết nối tới AI. Vui lòng kiểm tra API Key trong cài đặt hoặc thử lại sau.",
+    referenceTranslation: "[HỆ THỐNG QUÁ TẢI] Hiện tại Google Gemini đang giới hạn tốc độ (Quota Limit). Đây là bản dịch tạm thời để ứng dụng không bị gián đoạn. Vui lòng đợi 1-2 phút rồi thử lại đoạn tiếp theo.",
     keyTerms: [
-        { term: "API Key", meaning: "Khóa kết nối bị thiếu hoặc không hợp lệ." },
-        { term: "Quota", meaning: "Có thể tài khoản đã hết hạn ngạch miễn phí." }
+        { term: "Quota Limit", meaning: "Giới hạn dung lượng sử dụng API miễn phí." },
+        { term: "Flash Lite", meaning: "Mô hình AI nhẹ hơn đang được thử nghiệm." }
     ]
 });
 
@@ -179,8 +175,6 @@ export const generateLessonForChunk = async (textChunk: string): Promise<LessonC
   `;
 
   try {
-      if (!API_KEY) throw new Error("Missing API Key");
-
       return await withRetry(async () => {
         const response = await ai.models.generateContent({
             model: MODEL_NAME,
@@ -249,8 +243,6 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
     };
 
     try {
-        if (!API_KEY) throw new Error("Missing API Key");
-
         const result = await withRetry(async () => {
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
