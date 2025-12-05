@@ -8,6 +8,7 @@ export interface LessonContent {
   cleanedSourceText: string; // The AI-cleaned version of the source text (no headers/footers)
   referenceTranslation: string; // The AI's full translation of the chunk
   keyTerms: KeyTerm[]; // Explanations for difficult words/phrases in this specific chunk
+  source?: 'AI' | 'Fallback'; // Flag to indicate if translation is from AI or Fallback
 }
 
 export interface ProcessedChunk {

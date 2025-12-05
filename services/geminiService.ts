@@ -14,8 +14,8 @@ if (!apiKey) {
 
 const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_init" });
 
-// Switch to Flash Lite as requested to mitigate quota issues
-const MODEL_NAME = "gemini-flash-lite-latest";
+// Use standard Flash model for better quality translation
+const MODEL_NAME = "gemini-2.5-flash";
 
 // --- PERSISTENT CACHE ---
 // Load cache from LocalStorage on init
@@ -43,7 +43,7 @@ const saveCacheToStorage = () => {
 };
 
 // --- RATE LIMITER CONFIGURATION ---
-const MAX_REQUESTS_PER_MINUTE = 12; // Safety buffer (Google limit is usually 15 RPM)
+const MAX_REQUESTS_PER_MINUTE = 15; // Increased slightly for better experience
 const requestTimestamps: number[] = [];
 
 // Helper: Check and update rate limit
@@ -128,7 +128,8 @@ const lessonSchema: Schema = {
 const getFallbackLesson = (text: string, translatedText?: string): LessonContent => ({
     cleanedSourceText: text,
     referenceTranslation: translatedText || "Hệ thống đang bận. Vui lòng tự dịch và kiểm tra sau.",
-    keyTerms: [] // No AI means no key term extraction, return empty
+    keyTerms: [], // No AI means no key term extraction, return empty
+    source: 'Fallback'
 });
 
 // HYBRID FALLBACK: EN Phonetics + VI Meaning
@@ -171,7 +172,7 @@ const getFallbackDictionary = (term: string, reason: 'quota' | 'rate_limit' = 'q
     shortMeaning: reason === 'rate_limit' ? "Đợi 1 chút..." : "Lỗi Key/Quota",
     phonetic: "...",
     detailedExplanation: reason === 'rate_limit' 
-        ? "Bạn đang tra quá nhanh (trên 12 từ/phút). Vui lòng đợi khoảng 30 giây để hệ thống hồi phục." 
+        ? "Bạn đang tra quá nhanh (trên 15 từ/phút). Vui lòng đợi khoảng 30 giây để hệ thống hồi phục." 
         : "Không kết nối được AI (Kiểm tra VITE_API_KEY trên Vercel) và không tìm thấy từ này trong từ điển dự phòng."
 });
 
@@ -183,13 +184,13 @@ export const generateLessonForChunk = async (textChunk: string): Promise<LessonC
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: `
-                You are an expert academic translator.
+                You are an expert academic translator (English to Vietnamese).
                 INPUT: "${textChunk}"
                 TASKS:
-                1. Clean PDF artifacts.
-                2. Translate to Vietnamese.
-                3. Extract key terms.
-                Return JSON.
+                1. Clean PDF artifacts (remove headers, page nums, random names).
+                2. Translate the cleaned text to natural, professional Vietnamese.
+                3. Extract 3-5 difficult key terms/idioms with meanings.
+                Return purely JSON.
                 `,
                 config: {
                     responseMimeType: "application/json",
@@ -198,10 +199,15 @@ export const generateLessonForChunk = async (textChunk: string): Promise<LessonC
                 },
             });
 
-            const jsonText = response.text;
+            let jsonText = response.text;
             if (!jsonText) throw new Error("No data returned from Gemini");
+            
+            // Clean markdown code blocks if present
+            jsonText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
 
-            return JSON.parse(jsonText) as LessonContent;
+            const data = JSON.parse(jsonText) as LessonContent;
+            data.source = 'AI'; // Mark as AI generated
+            return data;
           }, 2, 2000); // 2 retries for AI
       } catch (error) {
           console.warn("Gemini API failed, switching to fallback translation...", error);
@@ -253,7 +259,7 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
       Task:
       1. Provide a concise Vietnamese meaning (max 6 words) for the tooltip.
       2. Provide the IPA phonetic transcription.
-      3. Provide a detailed explanation in Vietnamese.
+      3. Provide a detailed explanation in Vietnamese (usage, nuances).
     `;
 
     const schema: Schema = {
@@ -273,7 +279,10 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
                 contents: prompt,
                 config: { responseMimeType: "application/json", responseSchema: schema }
             });
-            if (response.text) return JSON.parse(response.text) as DictionaryResponse;
+            let text = response.text || "";
+            text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+            
+            if (text) return JSON.parse(text) as DictionaryResponse;
             throw new Error("Empty response");
         }, 1, 1000); 
         

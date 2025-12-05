@@ -145,9 +145,14 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
 
   // --- Comparison Logic ---
   const calculateSimilarity = (str1: string, str2: string) => {
-      const normalize = (s: string) => s.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "").trim().split(/\s+/).filter(w => w.length > 0);
-      const s1 = normalize(str1);
-      const s2 = normalize(str2);
+      // Improved tokenizer for Vietnamese
+      const normalize = (s: string) => s.toLowerCase()
+        .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+        
+      const s1 = normalize(str1).split(" ");
+      const s2 = normalize(str2).split(" ");
       
       const set1 = new Set(s1);
       const set2 = new Set(s2);
@@ -156,7 +161,14 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       const union = new Set([...set1, ...set2]);
       
       if (union.size === 0) return 0;
-      return Math.round((intersection.size / union.size) * 100);
+      
+      // Jaccard Index
+      let score = (intersection.size / union.size) * 100;
+      
+      // Bonus for almost matching
+      if (score > 80) score = 100;
+      
+      return Math.round(score);
   };
 
   const handleCheck = () => {
@@ -173,7 +185,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       }
   };
 
-  const isFallbackMode = lessonData?.keyTerms?.length === 0;
+  // Determine if we are in fallback mode based on the 'source' flag or absence of keyTerms
+  const isFallbackMode = lessonData?.source === 'Fallback' || (!lessonData?.source && lessonData?.keyTerms?.length === 0);
 
   if (loading) {
     return (
@@ -212,15 +225,14 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                 <span className="text-2xl">📖</span>
                 <h2 className="text-lg font-bold text-slate-800">Phần đọc (Reading)</h2>
             </div>
-            {/* Indicator if Key Terms are empty (Implies Fallback Mode) */}
-            {isFallbackMode && (
+            {/* Indicator */}
+            {isFallbackMode ? (
                  <div className="text-xs text-amber-700 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-200 flex items-center gap-1">
                     <span>⚡</span> Google Translate Mode
                 </div>
-            )}
-            {!isFallbackMode && (
-                <div className="text-xs text-slate-400 font-medium bg-white px-3 py-1 rounded-full border border-slate-200">
-                    Bôi đen từ để tra nghĩa
+            ) : (
+                <div className="text-xs text-indigo-700 font-bold bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200 flex items-center gap-1">
+                    <span>🤖</span> AI Gemini Mode
                 </div>
             )}
         </div>
@@ -230,11 +242,13 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
             {/* Source Text Box */}
             <div className="relative group">
                 <div 
-                    className="bg-[#fcfbf9] px-8 py-8 md:py-10 md:px-10 rounded-2xl border border-stone-200 shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)] cursor-text transition-all hover:border-indigo-300 relative overflow-hidden"
+                    className="bg-[#fdfbf7] px-8 py-8 md:py-10 md:px-10 rounded-2xl border border-stone-200 shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)] cursor-text transition-all hover:border-indigo-300 relative overflow-hidden"
                     onMouseUp={handleTextMouseUp}
                 >
                     <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-indigo-500 opacity-80"></div>
-                    <p className="font-serif text-[1.4rem] leading-[2.1] text-slate-800 tracking-normal antialiased selection:bg-indigo-100 selection:text-indigo-900">
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-bold text-slate-300 pointer-events-none uppercase tracking-wider">Source Text</div>
+                    
+                    <p className="font-serif text-[1.35rem] leading-loose text-slate-800 tracking-normal antialiased selection:bg-indigo-100 selection:text-indigo-900">
                         {lessonData.cleanedSourceText}
                     </p>
                 </div>
