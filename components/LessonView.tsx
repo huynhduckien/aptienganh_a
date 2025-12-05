@@ -67,8 +67,9 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       setLessonData(data);
     } catch (e: any) {
       console.error(e);
-      // Even if everything fails, we don't block the user, we just show error
-      setError("Không thể tải bản dịch. Vui lòng kiểm tra kết nối mạng.");
+      // Fallback handling is now done inside generateLessonForChunk, 
+      // but if something catastrophic happens:
+      setError("Lỗi kết nối nghiêm trọng. Vui lòng tải lại trang.");
     } finally {
       setLoading(false);
     }
@@ -193,7 +194,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       <div className="flex flex-col items-center justify-center h-96 space-y-4 bg-white rounded-2xl border border-slate-200">
         <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
         <p className="text-slate-500 font-medium">Đang chuẩn bị bài dịch...</p>
-        <p className="text-xs text-slate-400">Hệ thống sẽ dùng dịch dự phòng nếu AI quá tải.</p>
+        <p className="text-xs text-slate-400">Đang kết nối với AI (hoặc dịch dự phòng)...</p>
       </div>
     );
   }
@@ -202,7 +203,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       return (
         <div className="flex flex-col items-center justify-center h-96 space-y-4 bg-white rounded-2xl border border-slate-200 p-6 text-center">
             <div className="text-4xl">⚠️</div>
-            <h3 className="text-lg font-bold text-slate-800">Không thể tải nội dung</h3>
+            <h3 className="text-lg font-bold text-slate-800">Sự cố kết nối</h3>
             <p className="text-slate-500 max-w-md">{error}</p>
             <button 
                 onClick={fetchAIContent}
@@ -227,12 +228,12 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
             </div>
             {/* Indicator */}
             {isFallbackMode ? (
-                 <div className="text-xs text-amber-700 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-200 flex items-center gap-1">
-                    <span>⚡</span> Google Translate Mode
+                 <div className="text-xs text-amber-700 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-200 flex items-center gap-1 cursor-help" title="AI bị quá tải, đang dùng Google Dịch">
+                    <span>⚠️</span> Chế độ dự phòng (AI Overload)
                 </div>
             ) : (
                 <div className="text-xs text-indigo-700 font-bold bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200 flex items-center gap-1">
-                    <span>🤖</span> AI Gemini Mode
+                    <span>✨</span> AI Gemini Mode
                 </div>
             )}
         </div>
@@ -330,8 +331,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                     {/* Reference Translation */}
                     <div className="bg-green-50/50 border border-green-200 rounded-xl p-8 relative">
                         {isFallbackMode && (
-                             <div className="absolute top-4 right-4 text-[10px] font-bold text-white bg-green-600/80 px-2 py-0.5 rounded uppercase tracking-wider">
-                                Google Translate Check
+                             <div className="absolute top-4 right-4 text-[10px] font-bold text-white bg-amber-500 px-2 py-0.5 rounded uppercase tracking-wider">
+                                Chế độ dự phòng (AI quá tải)
                              </div>
                         )}
                         <h4 className="text-xs font-bold text-green-700 uppercase tracking-wider mb-4">Đáp án tham khảo</h4>

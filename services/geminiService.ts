@@ -47,7 +47,7 @@ const saveCacheToStorage = () => {
 };
 
 // --- RATE LIMITER CONFIGURATION ---
-const MAX_REQUESTS_PER_MINUTE = 15; // Increased slightly for better experience
+const MAX_REQUESTS_PER_MINUTE = 12; // Lower limit to be safe
 const requestTimestamps: number[] = [];
 
 // Helper: Check and update rate limit
@@ -70,7 +70,7 @@ const checkRateLimit = (): boolean => {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper: Retry wrapper with Exponential Backoff
-async function withRetry<T>(fn: () => Promise<T>, retries = 3, initialDelay = 2000): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 2, initialDelay = 1000): Promise<T> {
   let currentDelay = initialDelay;
   
   for (let i = 0; i < retries; i++) {
@@ -85,15 +85,16 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, initialDelay = 20
         error.status === 429;
 
       if (isQuotaError) {
-        if (i < retries - 1) {
-             console.warn(`Quota limit hit. Retrying in ${currentDelay}ms... (Attempt ${i + 1}/${retries})`);
-             await delay(currentDelay);
-             currentDelay *= 2; // Exponential backoff (2s -> 4s -> 8s)
-             continue;
-        }
+         // If quota error, DON'T retry too much, fail fast to switch to fallback
+         console.warn("Gemini Quota Exceeded. Switching to fallback immediately.");
+         throw new Error("QUOTA_EXCEEDED");
       }
       
-      // If not a quota error or retries exhausted, throw
+      if (i < retries - 1) {
+          await delay(currentDelay);
+          currentDelay *= 2; 
+          continue;
+      }
       throw error;
     }
   }
@@ -105,20 +106,20 @@ const lessonSchema: Schema = {
   properties: {
     cleanedSourceText: {
         type: Type.STRING,
-        description: "The cleaned English source text. Remove all PDF artifacts like 'ScienceDirect', 'Vol 55', 'Contents lists', page numbers, or random author names that are not part of the main sentence."
+        description: "The cleaned English source text."
     },
     referenceTranslation: {
       type: Type.STRING,
-      description: "A natural, high-quality Vietnamese translation of the cleaned English text.",
+      description: "A natural, high-quality Vietnamese translation.",
     },
     keyTerms: {
       type: Type.ARRAY,
-      description: "List of 3-5 difficult terms or phrases found in the text with their meanings.",
+      description: "List of 3-5 difficult terms.",
       items: {
         type: Type.OBJECT,
         properties: {
-          term: { type: Type.STRING, description: "The English term/phrase." },
-          meaning: { type: Type.STRING, description: "Vietnamese meaning and brief explanation." }
+          term: { type: Type.STRING },
+          meaning: { type: Type.STRING }
         },
         required: ["term", "meaning"]
       }
@@ -128,11 +129,10 @@ const lessonSchema: Schema = {
 };
 
 // Fallback Data Generators
-// MODIFIED: Accepts a translated text now
 const getFallbackLesson = (text: string, translatedText?: string): LessonContent => ({
     cleanedSourceText: text,
     referenceTranslation: translatedText || "Hệ thống đang bận. Vui lòng tự dịch và kiểm tra sau.",
-    keyTerms: [], // No AI means no key term extraction, return empty
+    keyTerms: [], 
     source: 'Fallback'
 });
 
@@ -141,7 +141,6 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
     let phonetic = "";
     let definitionEN = "";
 
-    // 1. Try to get Phonetic and EN definition from Free Dictionary API
     try {
         const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(term)}`);
         if (response.ok) {
@@ -149,15 +148,10 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
             const firstEntry = data[0];
             phonetic = firstEntry.phonetic || (firstEntry.phonetics.find((p:any) => p.text)?.text) || "";
             if (phonetic) phonetic = phonetic.replace(/\//g, '');
-            
-            // Get simple EN definition to help with translation context if needed
             definitionEN = firstEntry.meanings[0]?.definitions[0]?.definition || "";
         }
-    } catch (e) {
-        // Ignore dictionary error, proceed to translation
-    }
+    } catch (e) { }
 
-    // 2. Get Vietnamese Meaning using Translation Service (Google Translate/MyMemory)
     let vietnameseMeaning = "";
     try {
         vietnameseMeaning = await translateTextFallback(term);
@@ -173,63 +167,58 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
 };
 
 const getFallbackDictionary = (term: string, reason: 'quota' | 'rate_limit' = 'quota'): DictionaryResponse => ({
-    shortMeaning: reason === 'rate_limit' ? "Đợi 1 chút..." : "Lỗi Key/Quota",
+    shortMeaning: reason === 'rate_limit' ? "Đợi 1 chút..." : "Lỗi Quota",
     phonetic: "...",
     detailedExplanation: reason === 'rate_limit' 
-        ? "Bạn đang tra quá nhanh (trên 15 từ/phút). Vui lòng đợi khoảng 30 giây để hệ thống hồi phục." 
-        : "Không kết nối được AI (Kiểm tra VITE_API_KEY trên Vercel) và không tìm thấy từ này trong từ điển dự phòng."
+        ? "Bạn đang tra quá nhanh. Vui lòng đợi 30 giây." 
+        : "AI đang bị quá tải (Hết lượt miễn phí). Vui lòng thử lại sau 1 phút hoặc nhập API Key mới."
 });
 
 export const generateLessonForChunk = async (textChunk: string): Promise<LessonContent> => {
   // 1. Try AI First
-  if (apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init" && checkRateLimit()) {
+  const isValidKey = apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init";
+  
+  if (isValidKey && checkRateLimit()) {
       try {
           return await withRetry(async () => {
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: `
-                You are an expert academic translator (English to Vietnamese).
+                Translate to Vietnamese (Academic style).
                 INPUT: "${textChunk}"
                 TASKS:
-                1. Clean PDF artifacts (remove headers, page nums, random names).
-                2. Translate the cleaned text to natural, professional Vietnamese.
-                3. Extract 3-5 difficult key terms/idioms with meanings.
-                Return purely JSON.
+                1. Clean PDF artifacts.
+                2. Translate to Vietnamese.
+                3. Extract 3 difficult terms.
+                Return JSON.
                 `,
                 config: {
                     responseMimeType: "application/json",
                     responseSchema: lessonSchema,
-                    temperature: 0.1, 
                 },
             });
 
             let jsonText = response.text;
-            if (!jsonText) throw new Error("No data returned from Gemini");
-            
-            // Clean markdown code blocks if present
+            if (!jsonText) throw new Error("No data returned");
             jsonText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
 
             const data = JSON.parse(jsonText) as LessonContent;
-            data.source = 'AI'; // Mark as AI generated
+            data.source = 'AI';
             return data;
-          }, 2, 2000); // 2 retries for AI
-      } catch (error) {
-          console.warn("Gemini API failed, switching to fallback translation...", error);
-          // Fall through to fallback below
+          });
+      } catch (error: any) {
+          console.warn("AI Failed (Quota or Error). Switching to Fallback.", error.message);
+          // If error is specifically quota, we proceed to fallback immediately
       }
-  } else {
-      console.warn("API Key missing or Rate Limit hit. Using Fallback immediately.");
   }
 
   // 2. Fallback: Use Free Translation API
   try {
-      console.log("Fetching fallback translation...");
       const translated = await translateTextFallback(textChunk);
+      // Mark as Fallback so UI shows "Google Translate Mode"
       return getFallbackLesson(textChunk, translated);
   } catch (err) {
-      console.error("Fallback translation also failed", err);
-      // 3. Ultimate Fallback: Just return text with error message
-      return getFallbackLesson(textChunk);
+      return getFallbackLesson(textChunk, "Không thể dịch đoạn này. Vui lòng thử lại sau.");
   }
 };
 
@@ -240,54 +229,30 @@ export interface DictionaryResponse {
 }
 
 export const explainPhrase = async (phrase: string, fullContext: string): Promise<DictionaryResponse> => {
-    // 1. Check Cache first (Does not consume Quota)
     const cacheKey = phrase.trim().toLowerCase();
-    if (dictionaryCache.has(cacheKey)) {
-        console.log("Cache hit for:", phrase);
-        return dictionaryCache.get(cacheKey)!;
-    }
+    if (dictionaryCache.has(cacheKey)) return dictionaryCache.get(cacheKey)!;
 
-    // 2. Client-side Rate Limiter Check
     if (!checkRateLimit()) {
-        try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'rate_limit'); }
+         // Rate limit hit -> Go to fallback immediately to save quota
+         try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'rate_limit'); }
     }
 
-    if (!apiKey || apiKey.length < 10 || apiKey === "dummy_key_to_prevent_crash_on_init") {
+    if (!apiKey || apiKey.length < 10) {
         try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'quota'); }
     }
 
-    const prompt = `
-      Context: "${fullContext}"
-      Phrase to define: "${phrase}"
-      
-      Task:
-      1. Provide a concise Vietnamese meaning (max 6 words) for the tooltip.
-      2. Provide the IPA phonetic transcription.
-      3. Provide a detailed explanation in Vietnamese (usage, nuances).
-    `;
-
-    const schema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-            shortMeaning: { type: Type.STRING },
-            phonetic: { type: Type.STRING },
-            detailedExplanation: { type: Type.STRING }
-        },
-        required: ["shortMeaning", "phonetic", "detailedExplanation"]
-    };
-
+    // Try AI
     try {
         const result = await withRetry(async () => {
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
-                contents: prompt,
-                config: { responseMimeType: "application/json", responseSchema: schema }
+                contents: `Define "${phrase}" in Vietnamese (context: "${fullContext}"). JSON: shortMeaning, phonetic, detailedExplanation.`,
+                config: { responseMimeType: "application/json", responseSchema: { type: Type.OBJECT, properties: { shortMeaning: {type:Type.STRING}, phonetic: {type:Type.STRING}, detailedExplanation: {type:Type.STRING}}}}
             });
             let text = response.text || "";
             text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-            
             if (text) return JSON.parse(text) as DictionaryResponse;
-            throw new Error("Empty response");
+            throw new Error("Empty");
         }, 1, 1000); 
         
         dictionaryCache.set(cacheKey, result);
@@ -295,10 +260,9 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
         return result;
 
     } catch (error) {
-        // Fallback to Hybrid (EN Phonetic + VI Translation)
+        // AI Failed -> Use Fallback
         try {
-            const fallbackResult = await fetchVietnameseFallback(phrase);
-            return fallbackResult;
+            return await fetchVietnameseFallback(phrase);
         } catch (e) {
              return getFallbackDictionary(phrase, 'quota');
         }
