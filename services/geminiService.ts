@@ -115,10 +115,10 @@ const lessonSchema: Schema = {
 // Fallback Data Generators
 const getFallbackLesson = (text: string): LessonContent => ({
     cleanedSourceText: text,
-    referenceTranslation: "[HỆ THỐNG QUÁ TẢI] Hiện tại Google Gemini đang giới hạn tốc độ (Quota Limit). Đây là bản dịch tạm thời để ứng dụng không bị gián đoạn. Vui lòng đợi 1-2 phút rồi thử lại đoạn tiếp theo.",
+    referenceTranslation: "[LỖI KẾT NỐI] Không thể kết nối tới AI. Vui lòng kiểm tra API Key trong cài đặt hoặc thử lại sau.",
     keyTerms: [
-        { term: "Quota Limit", meaning: "Giới hạn dung lượng sử dụng API miễn phí." },
-        { term: "Flash Lite", meaning: "Mô hình AI nhẹ hơn đang được thử nghiệm." }
+        { term: "API Key", meaning: "Khóa kết nối bị thiếu hoặc không hợp lệ." },
+        { term: "Quota", meaning: "Có thể tài khoản đã hết hạn ngạch miễn phí." }
     ]
 });
 
