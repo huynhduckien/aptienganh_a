@@ -7,9 +7,13 @@ import { translateTextFallback } from "./translationService";
 // Lưu ý: process.env.API_KEY được Vite điền giá trị vào lúc Build thông qua file vite.config.ts
 const apiKey = process.env.API_KEY;
 
-if (!apiKey) {
-  console.error("❌ CRITICAL ERROR: API Key is missing!");
-  console.error("Please set VITE_API_KEY in your Vercel/Netlify Environment Variables.");
+// DEBUG LOGGING (Sẽ hiện trong F12 Console trình duyệt)
+console.log("--- DEBUG API KEY STATUS ---");
+if (!apiKey || apiKey.length < 10) {
+    console.warn("⚠️ API Key đang bị RỖNG hoặc KHÔNG HỢP LỆ.");
+    console.warn("Trên Vercel: Vào Settings -> Environment Variables -> Thêm VITE_API_KEY");
+} else {
+    console.log("✅ API Key đã được nạp thành công. Độ dài:", apiKey.length);
 }
 
 const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_init" });
@@ -178,7 +182,7 @@ const getFallbackDictionary = (term: string, reason: 'quota' | 'rate_limit' = 'q
 
 export const generateLessonForChunk = async (textChunk: string): Promise<LessonContent> => {
   // 1. Try AI First
-  if (apiKey && apiKey !== "dummy_key_to_prevent_crash_on_init" && checkRateLimit()) {
+  if (apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init" && checkRateLimit()) {
       try {
           return await withRetry(async () => {
             const response = await ai.models.generateContent({
@@ -248,7 +252,7 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
         try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'rate_limit'); }
     }
 
-    if (!apiKey || apiKey === "dummy_key_to_prevent_crash_on_init") {
+    if (!apiKey || apiKey.length < 10 || apiKey === "dummy_key_to_prevent_crash_on_init") {
         try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'quota'); }
     }
 
