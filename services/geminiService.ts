@@ -18,8 +18,8 @@ if (!apiKey || apiKey.length < 10) {
 
 const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_init" });
 
-// Use standard Flash model for better quality translation
-const MODEL_NAME = "gemini-2.5-flash";
+// Use Flash Lite model (Newest Preview) for better speed and lower quota usage
+const MODEL_NAME = "gemini-2.0-flash-lite-preview-02-05";
 
 // --- PERSISTENT CACHE ---
 // Load cache from LocalStorage on init
@@ -47,7 +47,7 @@ const saveCacheToStorage = () => {
 };
 
 // --- RATE LIMITER CONFIGURATION ---
-const MAX_REQUESTS_PER_MINUTE = 12; // Lower limit to be safe
+const MAX_REQUESTS_PER_MINUTE = 15; // Increased slightly for Flash Lite
 const requestTimestamps: number[] = [];
 
 // Helper: Check and update rate limit
@@ -70,7 +70,7 @@ const checkRateLimit = (): boolean => {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper: Retry wrapper with Exponential Backoff
-async function withRetry<T>(fn: () => Promise<T>, retries = 2, initialDelay = 1000): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, initialDelay = 2000): Promise<T> {
   let currentDelay = initialDelay;
   
   for (let i = 0; i < retries; i++) {
@@ -85,14 +85,13 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, initialDelay = 10
         error.status === 429;
 
       if (isQuotaError) {
-         // If quota error, DON'T retry too much, fail fast to switch to fallback
-         console.warn("Gemini Quota Exceeded. Switching to fallback immediately.");
-         throw new Error("QUOTA_EXCEEDED");
+         console.warn(`Gemini Quota Warning (Attempt ${i+1}/${retries}). Retrying in ${currentDelay}ms...`);
+         if (i === retries - 1) throw new Error("QUOTA_EXCEEDED");
       }
       
       if (i < retries - 1) {
           await delay(currentDelay);
-          currentDelay *= 2; 
+          currentDelay *= 1.5; // Backoff
           continue;
       }
       throw error;
