@@ -8,8 +8,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      // Vital: Polyfill process.env so the Google GenAI SDK works in the browser
-      'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_API_KEY || ''),
+      // QUAN TRỌNG: Map biến VITE_API_KEY (từ Vercel) vào process.env.API_KEY (cho Google SDK)
+      // JSON.stringify là bắt buộc để chèn giá trị chuỗi vào code
+      'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY || env.API_KEY || ''),
     },
     build: {
       outDir: 'dist',

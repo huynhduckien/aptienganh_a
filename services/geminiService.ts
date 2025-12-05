@@ -1,7 +1,16 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Khởi tạo AI Client
+// Lưu ý: process.env.API_KEY được Vite điền giá trị vào lúc Build thông qua file vite.config.ts
+const apiKey = process.env.API_KEY;
+
+if (!apiKey) {
+  console.error("❌ CRITICAL ERROR: API Key is missing!");
+  console.error("Please set VITE_API_KEY in your Vercel/Netlify Environment Variables.");
+}
+
+const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_init" });
 
 // Switch to Flash Lite as requested to mitigate quota issues
 const MODEL_NAME = "gemini-flash-lite-latest";
@@ -115,10 +124,10 @@ const lessonSchema: Schema = {
 // Fallback Data Generators
 const getFallbackLesson = (text: string): LessonContent => ({
     cleanedSourceText: text,
-    referenceTranslation: "[HỆ THỐNG QUÁ TẢI] Hiện tại Google Gemini đang giới hạn tốc độ (Quota Limit). Đây là bản dịch tạm thời để ứng dụng không bị gián đoạn. Vui lòng đợi 1-2 phút rồi thử lại đoạn tiếp theo.",
+    referenceTranslation: "[CHẾ ĐỘ MOCK] Không tìm thấy API Key hoặc Quota đã hết. Đây là bản dịch mẫu để bạn trải nghiệm giao diện.",
     keyTerms: [
-        { term: "Quota Limit", meaning: "Giới hạn dung lượng sử dụng API miễn phí." },
-        { term: "Flash Lite", meaning: "Mô hình AI nhẹ hơn đang được thử nghiệm." }
+        { term: "Missing API Key", meaning: "Vui lòng cài đặt VITE_API_KEY trong Vercel Settings." },
+        { term: "Mock Data", meaning: "Dữ liệu giả lập dùng khi mất kết nối." }
     ]
 });
 
@@ -145,14 +154,20 @@ const fetchFreeDictionary = async (term: string): Promise<DictionaryResponse> =>
 };
 
 const getFallbackDictionary = (term: string, reason: 'quota' | 'rate_limit' = 'quota'): DictionaryResponse => ({
-    shortMeaning: reason === 'rate_limit' ? "Đợi 1 chút..." : "Lỗi Quota",
+    shortMeaning: reason === 'rate_limit' ? "Đợi 1 chút..." : "Lỗi Key/Quota",
     phonetic: "...",
     detailedExplanation: reason === 'rate_limit' 
         ? "Bạn đang tra quá nhanh (trên 12 từ/phút). Vui lòng đợi khoảng 30 giây để hệ thống hồi phục." 
-        : "Hệ thống AI đang bận (Quá tải) và không tìm thấy từ này trong từ điển miễn phí dự phòng."
+        : "Không kết nối được AI (Kiểm tra VITE_API_KEY trên Vercel) và không tìm thấy từ này trong từ điển dự phòng."
 });
 
 export const generateLessonForChunk = async (textChunk: string): Promise<LessonContent> => {
+  // If no API Key is set, return fallback immediately
+  if (!apiKey || apiKey === "dummy_key_to_prevent_crash_on_init") {
+      console.warn("No API Key found, using fallback lesson.");
+      return getFallbackLesson(textChunk);
+  }
+
   // Generate Lesson is heavy, we always check rate limit but we prioritize it over dictionary
   if (!checkRateLimit()) {
       // If rate limited, we force a wait here instead of failing immediately for main content
@@ -222,6 +237,14 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
         }
     }
 
+    if (!apiKey || apiKey === "dummy_key_to_prevent_crash_on_init") {
+        try {
+            return await fetchFreeDictionary(phrase);
+        } catch {
+             return getFallbackDictionary(phrase, 'quota');
+        }
+    }
+
     const prompt = `
       Context: "${fullContext}"
       Phrase to define: "${phrase}"
@@ -271,8 +294,6 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
         // 4. Fallback to Free Dictionary API if Gemini Quota dead
         try {
             const freeResult = await fetchFreeDictionary(phrase);
-            // We don't cache free result to localstorage to allow retrying AI later
-            // dictionaryCache.set(cacheKey, freeResult); 
             return freeResult;
         } catch (e) {
              return getFallbackDictionary(phrase, 'quota');
