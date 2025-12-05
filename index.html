@@ -28,18 +28,20 @@
       body { font-family: 'Inter', sans-serif; }
       .paper-text { font-family: 'Merriweather', serif; line-height: 1.8; }
     </style>
-  <script type="importmap">
+<script type="importmap">
 {
   "imports": {
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
-    "react/": "https://aistudiocdn.com/react@^19.2.1/",
     "react": "https://aistudiocdn.com/react@^19.2.1",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/"
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0"
   }
 }
 </script>
 </head>
   <body class="bg-gray-50 text-slate-800 antialiased">
     <div id="root"></div>
+    <!-- QUAN TRỌNG: Dòng này kích hoạt React -->
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
