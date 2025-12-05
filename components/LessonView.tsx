@@ -67,11 +67,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       setLessonData(data);
     } catch (e: any) {
       console.error(e);
-      let msg = "Có lỗi xảy ra khi tải bài dịch.";
-      if (e.message?.includes('quota') || e.message?.includes('429')) {
-          msg = "Hệ thống đang quá tải (Limit Quota). Vui lòng đợi giây lát và thử lại.";
-      }
-      setError(msg);
+      // Even if everything fails, we don't block the user, we just show error
+      setError("Không thể tải bản dịch. Vui lòng kiểm tra kết nối mạng.");
     } finally {
       setLoading(false);
     }
@@ -180,66 +177,74 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
     return (
       <div className="flex flex-col items-center justify-center h-96 space-y-4 bg-white rounded-2xl border border-slate-200">
         <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-        <p className="text-slate-500 font-medium">AI đang chuẩn bị bài dịch...</p>
-        <p className="text-xs text-slate-400">Nếu quá lâu, hệ thống có thể đang thử lại do quá tải.</p>
+        <p className="text-slate-500 font-medium">Đang chuẩn bị bài dịch...</p>
+        <p className="text-xs text-slate-400">Hệ thống sẽ dùng dịch dự phòng nếu AI quá tải.</p>
       </div>
     );
   }
 
-  if (error || !lessonData) {
+  if (error) {
       return (
         <div className="flex flex-col items-center justify-center h-96 space-y-4 bg-white rounded-2xl border border-slate-200 p-6 text-center">
             <div className="text-4xl">⚠️</div>
             <h3 className="text-lg font-bold text-slate-800">Không thể tải nội dung</h3>
-            <p className="text-slate-500 max-w-md">{error || "Đã xảy ra lỗi không xác định."}</p>
+            <p className="text-slate-500 max-w-md">{error}</p>
             <button 
                 onClick={fetchAIContent}
                 className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200"
             >
-                Thử lại ngay
+                Thử lại
             </button>
         </div>
       );
   }
 
+  if (!lessonData) return null;
+
   return (
     <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-visible min-h-[500px] flex flex-col relative">
         
-        {/* Header - Minimalist */}
+        {/* Header */}
         <div className="px-8 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 rounded-t-3xl">
              <div className="flex items-center gap-2">
                 <span className="text-2xl">📖</span>
                 <h2 className="text-lg font-bold text-slate-800">Phần đọc (Reading)</h2>
             </div>
-            <div className="text-xs text-slate-400 font-medium bg-white px-3 py-1 rounded-full border border-slate-200">
-                Bôi đen từ để tra nghĩa
-            </div>
+            {/* Indicator if Key Terms are empty (Implies Fallback Mode) */}
+            {lessonData.keyTerms.length === 0 && (
+                 <div className="text-xs text-amber-600 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                    Chế độ Dịch máy (AI quá tải)
+                </div>
+            )}
+            {lessonData.keyTerms.length > 0 && (
+                <div className="text-xs text-slate-400 font-medium bg-white px-3 py-1 rounded-full border border-slate-200">
+                    Bôi đen từ để tra nghĩa
+                </div>
+            )}
         </div>
 
         <div className="w-full p-6 md:p-8 space-y-8" ref={textContainerRef}>
             
-            {/* Source Text Box - Paper Style */}
+            {/* Source Text Box */}
             <div className="relative group">
                 <div 
                     className="bg-[#fcfbf9] px-8 py-8 md:py-10 md:px-10 rounded-2xl border border-stone-200 shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)] cursor-text transition-all hover:border-indigo-300 relative overflow-hidden"
                     onMouseUp={handleTextMouseUp}
                 >
-                    {/* Visual accent */}
                     <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-indigo-500 opacity-80"></div>
-
                     <p className="font-serif text-[1.4rem] leading-[2.1] text-slate-800 tracking-normal antialiased selection:bg-indigo-100 selection:text-indigo-900">
-                        {lessonData.cleanedSourceText || chunk.text}
+                        {lessonData.cleanedSourceText}
                     </p>
                 </div>
 
-                {/* Selection Popover / Result Tooltip */}
+                {/* Selection Popover */}
                 {selection.show && (
                     <div 
                         className="absolute z-50 transform -translate-x-1/2 -translate-y-full transition-all duration-200"
                         style={{ top: selection.top, left: selection.left }}
                     >
                         {selection.loading ? (
-                             <div className="mb-2 bg-slate-800 text-white px-4 py-2 rounded-full shadow-xl flex items-center space-x-2 border border-slate-700 animate-in fade-in zoom-in-95 duration-200">
+                             <div className="mb-2 bg-slate-800 text-white px-4 py-2 rounded-full shadow-xl flex items-center space-x-2 border border-slate-700">
                                 <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
                                 <span className="text-sm font-medium whitespace-nowrap">Đang tra...</span>
                             </div>
@@ -254,22 +259,13 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                                             <button 
                                                 onClick={(e) => { e.stopPropagation(); playAudio(selection.text); }}
                                                 className="ml-1 text-slate-400 hover:text-green-600 p-0.5 rounded-full hover:bg-green-50 transition-colors"
-                                                title="Nghe phát âm"
                                             >
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                                                    <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318 0-2.402.933l-.034 6.911c.088 1.126 1.449 1.156 2.451 1.156H6.44l4.5 4.5c.945.945 2.56.276 2.56-1.06V4.06zM17.786 7.158c.391-.391 1.024-.391 1.414 0 2.228 2.229 2.228 5.842 0 8.071-.39.39-1.023.39-1.414 0-.39-.39-.39-1.023 0-1.414 1.447-1.447 1.447-3.793 0-5.24-.391-.391-.391-1.024 0-1.414z" />
-                                                    <path d="M15.665 9.279c.391-.391 1.024-.391 1.414 0 .902.902.902 2.365 0 3.267-.39.39-1.023.39-1.414 0-.39-.39-.39-1.023 0-1.414.121-.121.121-.318 0-.439-.391-.391-.391-1.024 0-1.414z" />
-                                                </svg>
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318 0-2.402.933l-.034 6.911c.088 1.126 1.449 1.156 2.451 1.156H6.44l4.5 4.5c.945.945 2.56.276 2.56-1.06V4.06zM17.786 7.158c.391-.391 1.024-.391 1.414 0 2.228 2.229 2.228 5.842 0 8.071-.39.39-1.023.39-1.414 0-.39-.39-.39-1.023 0-1.414 1.447-1.447 1.447-3.793 0-5.24-.391-.391-.391-1.024 0-1.414z" /></svg>
                                             </button>
                                         </div>
                                     </div>
-                                    <button 
-                                        onClick={closeSelection}
-                                        className="text-slate-300 hover:text-slate-500 -mr-2 -mt-2 p-1 rounded-full hover:bg-slate-50"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-                                        </svg>
+                                    <button onClick={closeSelection} className="text-slate-300 hover:text-slate-500 -mr-2 -mt-2 p-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" /></svg>
                                     </button>
                                 </div>
                                 <div className="absolute left-1/2 -translate-x-1/2 -bottom-2.5 w-5 h-5 bg-white border-r-2 border-b-2 border-green-400 transform rotate-45"></div>
@@ -279,7 +275,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                 )}
             </div>
 
-            {/* Input Box - Distinct from Source */}
+            {/* Input Box */}
             <div className="relative">
                 <div className="absolute -top-3 left-4 bg-white px-2 z-10">
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Bản dịch của bạn</span>
@@ -323,7 +319,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                         </p>
                     </div>
 
-                    {/* Key Terms */}
+                    {/* Key Terms (Only show if AI provided them) */}
                     {lessonData.keyTerms && lessonData.keyTerms.length > 0 && (
                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-6">
                             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Từ vựng quan trọng</h4>

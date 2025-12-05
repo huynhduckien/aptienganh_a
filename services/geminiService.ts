@@ -1,5 +1,7 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
+import { translateTextFallback } from "./translationService";
 
 // Khởi tạo AI Client
 // Lưu ý: process.env.API_KEY được Vite điền giá trị vào lúc Build thông qua file vite.config.ts
@@ -122,13 +124,11 @@ const lessonSchema: Schema = {
 };
 
 // Fallback Data Generators
-const getFallbackLesson = (text: string): LessonContent => ({
+// MODIFIED: Accepts a translated text now
+const getFallbackLesson = (text: string, translatedText?: string): LessonContent => ({
     cleanedSourceText: text,
-    referenceTranslation: "[CHẾ ĐỘ MOCK] Không tìm thấy API Key hoặc Quota đã hết. Đây là bản dịch mẫu để bạn trải nghiệm giao diện.",
-    keyTerms: [
-        { term: "Missing API Key", meaning: "Vui lòng cài đặt VITE_API_KEY trong Vercel Settings." },
-        { term: "Mock Data", meaning: "Dữ liệu giả lập dùng khi mất kết nối." }
-    ]
+    referenceTranslation: translatedText || "Hệ thống đang bận. Vui lòng tự dịch và kiểm tra sau.",
+    keyTerms: [] // No AI means no key term extraction, return empty
 });
 
 // Fallback to Free Dictionary API
@@ -162,52 +162,49 @@ const getFallbackDictionary = (term: string, reason: 'quota' | 'rate_limit' = 'q
 });
 
 export const generateLessonForChunk = async (textChunk: string): Promise<LessonContent> => {
-  // If no API Key is set, return fallback immediately
-  if (!apiKey || apiKey === "dummy_key_to_prevent_crash_on_init") {
-      console.warn("No API Key found, using fallback lesson.");
-      return getFallbackLesson(textChunk);
+  // 1. Try AI First
+  if (apiKey && apiKey !== "dummy_key_to_prevent_crash_on_init" && checkRateLimit()) {
+      try {
+          return await withRetry(async () => {
+            const response = await ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: `
+                You are an expert academic translator.
+                INPUT: "${textChunk}"
+                TASKS:
+                1. Clean PDF artifacts.
+                2. Translate to Vietnamese.
+                3. Extract key terms.
+                Return JSON.
+                `,
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: lessonSchema,
+                    temperature: 0.1, 
+                },
+            });
+
+            const jsonText = response.text;
+            if (!jsonText) throw new Error("No data returned from Gemini");
+
+            return JSON.parse(jsonText) as LessonContent;
+          }, 2, 2000); // 2 retries for AI
+      } catch (error) {
+          console.warn("Gemini API failed, switching to fallback translation...", error);
+          // Fall through to fallback below
+      }
+  } else {
+      console.warn("API Key missing or Rate Limit hit. Using Fallback immediately.");
   }
 
-  // Generate Lesson is heavy, we always check rate limit but we prioritize it over dictionary
-  if (!checkRateLimit()) {
-      // If rate limited, we force a wait here instead of failing immediately for main content
-      console.warn("Rate limit locally hit for Lesson, waiting 5s...");
-      await delay(5000);
-  }
-
-  const prompt = `
-    You are an expert academic translator.
-    
-    INPUT TEXT (Extracted from PDF, may contain artifacts):
-    "${textChunk}"
-    
-    TASKS:
-    1. **CLEAN**: Fix the input text. Remove any PDF headers/footers (e.g., 'ScienceDirect', dates, author lists, 'Corresponding author') that interrupt the flow. Join broken words.
-    2. **TRANSLATE**: Translate the *cleaned* text into professional Vietnamese.
-    3. **EXTRACT**: Identify key terms.
-
-    Return the result in JSON.
-  `;
-
+  // 2. Fallback: Use Free Translation API
   try {
-      return await withRetry(async () => {
-        const response = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: prompt,
-            config: {
-            responseMimeType: "application/json",
-            responseSchema: lessonSchema,
-            temperature: 0.1, 
-            },
-        });
-
-        const jsonText = response.text;
-        if (!jsonText) throw new Error("No data returned from Gemini");
-
-        return JSON.parse(jsonText) as LessonContent;
-      }, 3, 2000); // 3 retries, start waiting 2s
-  } catch (error) {
-      console.error("Gemini API Error (Lesson):", error);
+      console.log("Fetching fallback translation...");
+      const translated = await translateTextFallback(textChunk);
+      return getFallbackLesson(textChunk, translated);
+  } catch (err) {
+      console.error("Fallback translation also failed", err);
+      // 3. Ultimate Fallback: Just return text with error message
       return getFallbackLesson(textChunk);
   }
 };
@@ -228,21 +225,11 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
 
     // 2. Client-side Rate Limiter Check
     if (!checkRateLimit()) {
-        console.warn("Client-side rate limit hit.");
-        // Try fallback dict if rate limited
-        try {
-            return await fetchFreeDictionary(phrase);
-        } catch {
-            return getFallbackDictionary(phrase, 'rate_limit');
-        }
+        try { return await fetchFreeDictionary(phrase); } catch { return getFallbackDictionary(phrase, 'rate_limit'); }
     }
 
     if (!apiKey || apiKey === "dummy_key_to_prevent_crash_on_init") {
-        try {
-            return await fetchFreeDictionary(phrase);
-        } catch {
-             return getFallbackDictionary(phrase, 'quota');
-        }
+        try { return await fetchFreeDictionary(phrase); } catch { return getFallbackDictionary(phrase, 'quota'); }
     }
 
     const prompt = `
@@ -251,16 +238,16 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
       
       Task:
       1. Provide a concise Vietnamese meaning (max 6 words) for the tooltip.
-      2. Provide the IPA phonetic transcription (e.g., /həˈləʊ/).
-      3. Provide a detailed explanation of how this phrase is used in this specific academic context (in Vietnamese).
+      2. Provide the IPA phonetic transcription.
+      3. Provide a detailed explanation in Vietnamese.
     `;
 
     const schema: Schema = {
         type: Type.OBJECT,
         properties: {
-            shortMeaning: { type: Type.STRING, description: "Concise Vietnamese translation (max 6 words)." },
-            phonetic: { type: Type.STRING, description: "IPA phonetic transcription." },
-            detailedExplanation: { type: Type.STRING, description: "Detailed explanation of the term in this context." }
+            shortMeaning: { type: Type.STRING },
+            phonetic: { type: Type.STRING },
+            detailedExplanation: { type: Type.STRING }
         },
         required: ["shortMeaning", "phonetic", "detailedExplanation"]
     };
@@ -270,28 +257,17 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: prompt,
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: schema
-                }
+                config: { responseMimeType: "application/json", responseSchema: schema }
             });
-            
-            if (response.text) {
-                return JSON.parse(response.text) as DictionaryResponse;
-            }
+            if (response.text) return JSON.parse(response.text) as DictionaryResponse;
             throw new Error("Empty response");
-        }, 2, 1000); 
+        }, 1, 1000); 
         
-        // 3. Save to Cache
         dictionaryCache.set(cacheKey, result);
         saveCacheToStorage();
-        
         return result;
 
     } catch (error) {
-        console.error("Gemini API Error (Dictionary):", error);
-        
-        // 4. Fallback to Free Dictionary API if Gemini Quota dead
         try {
             const freeResult = await fetchFreeDictionary(phrase);
             return freeResult;
