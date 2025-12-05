@@ -173,6 +173,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       }
   };
 
+  const isFallbackMode = lessonData?.keyTerms?.length === 0;
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-96 space-y-4 bg-white rounded-2xl border border-slate-200">
@@ -211,12 +213,12 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                 <h2 className="text-lg font-bold text-slate-800">Phần đọc (Reading)</h2>
             </div>
             {/* Indicator if Key Terms are empty (Implies Fallback Mode) */}
-            {lessonData.keyTerms.length === 0 && (
-                 <div className="text-xs text-amber-600 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
-                    Chế độ Dịch máy (AI quá tải)
+            {isFallbackMode && (
+                 <div className="text-xs text-amber-700 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-200 flex items-center gap-1">
+                    <span>⚡</span> Google Translate Mode
                 </div>
             )}
-            {lessonData.keyTerms.length > 0 && (
+            {!isFallbackMode && (
                 <div className="text-xs text-slate-400 font-medium bg-white px-3 py-1 rounded-full border border-slate-200">
                     Bôi đen từ để tra nghĩa
                 </div>
@@ -312,7 +314,12 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                     </div>
 
                     {/* Reference Translation */}
-                    <div className="bg-green-50/50 border border-green-200 rounded-xl p-8">
+                    <div className="bg-green-50/50 border border-green-200 rounded-xl p-8 relative">
+                        {isFallbackMode && (
+                             <div className="absolute top-4 right-4 text-[10px] font-bold text-white bg-green-600/80 px-2 py-0.5 rounded uppercase tracking-wider">
+                                Google Translate Check
+                             </div>
+                        )}
                         <h4 className="text-xs font-bold text-green-700 uppercase tracking-wider mb-4">Đáp án tham khảo</h4>
                         <p className="text-green-900 text-xl leading-loose font-serif">
                             {lessonData.referenceTranslation}

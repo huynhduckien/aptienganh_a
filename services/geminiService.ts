@@ -131,26 +131,40 @@ const getFallbackLesson = (text: string, translatedText?: string): LessonContent
     keyTerms: [] // No AI means no key term extraction, return empty
 });
 
-// Fallback to Free Dictionary API
-const fetchFreeDictionary = async (term: string): Promise<DictionaryResponse> => {
+// HYBRID FALLBACK: EN Phonetics + VI Meaning
+const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse> => {
+    let phonetic = "";
+    let definitionEN = "";
+
+    // 1. Try to get Phonetic and EN definition from Free Dictionary API
     try {
         const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(term)}`);
-        if (!response.ok) throw new Error("Not found");
-        const data = await response.json();
-        
-        const firstEntry = data[0];
-        const firstMeaning = firstEntry.meanings[0];
-        const definition = firstMeaning.definitions[0].definition;
-        const phonetic = firstEntry.phonetic || (firstEntry.phonetics.find((p:any) => p.text)?.text) || "";
-
-        return {
-            shortMeaning: "(EN) " + firstMeaning.partOfSpeech,
-            phonetic: phonetic.replace(/\//g, ''),
-            detailedExplanation: `[AI bận, dùng từ điển Anh-Anh miễn phí] \nDefinition: ${definition}\n\nExample: ${firstMeaning.definitions[0].example || "N/A"}`
-        };
+        if (response.ok) {
+            const data = await response.json();
+            const firstEntry = data[0];
+            phonetic = firstEntry.phonetic || (firstEntry.phonetics.find((p:any) => p.text)?.text) || "";
+            if (phonetic) phonetic = phonetic.replace(/\//g, '');
+            
+            // Get simple EN definition to help with translation context if needed
+            definitionEN = firstEntry.meanings[0]?.definitions[0]?.definition || "";
+        }
     } catch (e) {
-        throw new Error("Free Dictionary failed");
+        // Ignore dictionary error, proceed to translation
     }
+
+    // 2. Get Vietnamese Meaning using Translation Service (Google Translate/MyMemory)
+    let vietnameseMeaning = "";
+    try {
+        vietnameseMeaning = await translateTextFallback(term);
+    } catch (e) {
+        vietnameseMeaning = "Lỗi dịch";
+    }
+
+    return {
+        shortMeaning: vietnameseMeaning,
+        phonetic: phonetic,
+        detailedExplanation: `[Chế độ Dịch máy]\n\nNghĩa tiếng Việt: ${vietnameseMeaning}\n\n${definitionEN ? `Định nghĩa gốc (EN): ${definitionEN}` : ""}`
+    };
 };
 
 const getFallbackDictionary = (term: string, reason: 'quota' | 'rate_limit' = 'quota'): DictionaryResponse => ({
@@ -225,11 +239,11 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
 
     // 2. Client-side Rate Limiter Check
     if (!checkRateLimit()) {
-        try { return await fetchFreeDictionary(phrase); } catch { return getFallbackDictionary(phrase, 'rate_limit'); }
+        try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'rate_limit'); }
     }
 
     if (!apiKey || apiKey === "dummy_key_to_prevent_crash_on_init") {
-        try { return await fetchFreeDictionary(phrase); } catch { return getFallbackDictionary(phrase, 'quota'); }
+        try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'quota'); }
     }
 
     const prompt = `
@@ -268,9 +282,10 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
         return result;
 
     } catch (error) {
+        // Fallback to Hybrid (EN Phonetic + VI Translation)
         try {
-            const freeResult = await fetchFreeDictionary(phrase);
-            return freeResult;
+            const fallbackResult = await fetchVietnameseFallback(phrase);
+            return fallbackResult;
         } catch (e) {
              return getFallbackDictionary(phrase, 'quota');
         }
