@@ -98,7 +98,7 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-gray-50 text-slate-900 font-sans selection:bg-sky-100">
       {/* Navbar */}
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="w-full max-w-[98%] xl:max-w-[1900px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
             <div 
               className="flex items-center gap-2 cursor-pointer group" 
               onClick={() => setAppState('upload')}
@@ -129,7 +129,7 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="w-full max-w-[98%] xl:max-w-[1900px] mx-auto px-4 sm:px-6 py-6 md:py-8">
         
         {/* Upload State */}
         {appState === 'upload' && (
@@ -179,7 +179,7 @@ const App: React.FC = () => {
 
         {/* Study State */}
         {appState === 'study' && (
-          <div className="flex flex-col lg:flex-row gap-8 items-start">
+          <div className="flex flex-col lg:flex-row gap-6 xl:gap-8 items-start">
             
             {/* Main Area */}
             <div className="flex-1 w-full min-w-0">
@@ -203,7 +203,7 @@ const App: React.FC = () => {
             </div>
 
             {/* Sidebar Desktop */}
-            <div className="hidden lg:block w-80 sticky top-24 shrink-0 space-y-4">
+            <div className="hidden lg:block w-80 xl:w-96 sticky top-24 shrink-0 space-y-4">
                
                {/* Dictionary Card */}
                {dictionary && (

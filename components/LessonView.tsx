@@ -203,25 +203,31 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-visible min-h-[500px] flex flex-col p-6 md:p-10 relative">
+    <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-visible min-h-[500px] flex flex-col relative">
         
-        {/* Header */}
-        <div className="text-center mb-6">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center justify-center gap-2">
-                <span className="text-2xl">✍️</span>
-                Luyện Dịch
-            </h2>
+        {/* Header - Minimalist */}
+        <div className="px-8 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 rounded-t-3xl">
+             <div className="flex items-center gap-2">
+                <span className="text-2xl">📖</span>
+                <h2 className="text-lg font-bold text-slate-800">Phần đọc (Reading)</h2>
+            </div>
+            <div className="text-xs text-slate-400 font-medium bg-white px-3 py-1 rounded-full border border-slate-200">
+                Bôi đen từ để tra nghĩa
+            </div>
         </div>
 
-        <div className="w-full space-y-6" ref={textContainerRef}>
+        <div className="w-full p-6 md:p-8 space-y-8" ref={textContainerRef}>
             
-            {/* Source Text Box - Now cleaner */}
+            {/* Source Text Box - Paper Style */}
             <div className="relative group">
                 <div 
-                    className="bg-white p-6 md:p-8 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-md transition-all selection:bg-green-200 selection:text-green-900"
+                    className="bg-[#fcfbf9] px-8 py-8 md:py-10 md:px-10 rounded-2xl border border-stone-200 shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)] cursor-text transition-all hover:border-indigo-300 relative overflow-hidden"
                     onMouseUp={handleTextMouseUp}
                 >
-                    <p className="font-serif text-2xl leading-loose text-slate-800 tracking-wide">
+                    {/* Visual accent */}
+                    <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-indigo-500 opacity-80"></div>
+
+                    <p className="font-serif text-[1.4rem] leading-[2.1] text-slate-800 tracking-normal antialiased selection:bg-indigo-100 selection:text-indigo-900">
                         {lessonData.cleanedSourceText || chunk.text}
                     </p>
                 </div>
@@ -273,14 +279,17 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                 )}
             </div>
 
-            {/* Input Box */}
-            <div>
+            {/* Input Box - Distinct from Source */}
+            <div className="relative">
+                <div className="absolute -top-3 left-4 bg-white px-2 z-10">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Bản dịch của bạn</span>
+                </div>
                 <textarea
                     ref={inputRef}
                     value={userTranslation}
                     onChange={(e) => setUserTranslation(e.target.value)}
-                    placeholder="Gõ bản dịch của bạn vào đây..."
-                    className="w-full p-6 md:p-8 rounded-2xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all min-h-[160px] text-xl leading-loose font-medium text-slate-700 resize-none shadow-sm placeholder:text-slate-300 placeholder:font-normal"
+                    placeholder="Gõ bản dịch vào đây..."
+                    className="w-full p-6 md:p-8 rounded-2xl border border-slate-200 bg-white focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all min-h-[160px] text-xl leading-loose font-medium text-slate-700 resize-none shadow-sm placeholder:text-slate-300 placeholder:font-normal"
                     disabled={showResult}
                 />
             </div>
@@ -290,15 +299,15 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                 <button 
                     onClick={handleCheck}
                     disabled={userTranslation.length < 5}
-                    className="w-full bg-indigo-600 text-white text-xl font-bold py-4 rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-200 mt-2"
+                    className="w-full bg-slate-900 text-white text-lg font-bold py-4 rounded-xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-slate-200 mt-2 flex items-center justify-center gap-2"
                 >
-                    Kiểm tra độ chính xác
+                    <span>✨</span> Kiểm tra kết quả
                 </button>
             ) : (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                     {/* Score Card */}
                     <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex items-center justify-between">
-                        <span className="font-bold text-slate-600 text-lg">Độ chính xác tương đồng:</span>
+                        <span className="font-bold text-slate-600 text-lg">Độ chính xác:</span>
                         <div className="flex items-center space-x-2">
                              <span className={`text-4xl font-black ${translationScore! > 70 ? 'text-green-600' : translationScore! > 40 ? 'text-yellow-600' : 'text-red-500'}`}>
                                 {translationScore}%
@@ -307,8 +316,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                     </div>
 
                     {/* Reference Translation */}
-                    <div className="bg-green-50 border border-green-200 rounded-xl p-8">
-                        <h4 className="text-xs font-bold text-green-700 uppercase tracking-wider mb-4">Đáp án tham khảo (Reference)</h4>
+                    <div className="bg-green-50/50 border border-green-200 rounded-xl p-8">
+                        <h4 className="text-xs font-bold text-green-700 uppercase tracking-wider mb-4">Đáp án tham khảo</h4>
                         <p className="text-green-900 text-xl leading-loose font-serif">
                             {lessonData.referenceTranslation}
                         </p>
