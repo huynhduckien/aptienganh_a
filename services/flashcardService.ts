@@ -14,6 +14,7 @@ const ONE_DAY = 24 * 60 * 60 * 1000;
 const LEARNING_STEPS = [1, 10]; // Minutes
 const GRADUATING_INTERVAL = 1; // Day
 const STARTING_EASE = 2.5;
+const MASTERED_INTERVAL = 36500; // 100 years (For 'Easy' skip)
 
 export interface FlashcardStats {
     total: number;
@@ -155,7 +156,6 @@ const parseCSV = (text: string): string[][] => {
 export const importFlashcardsFromSheet = async (sheetUrl: string): Promise<{ added: number, total: number, error?: string }> => {
     try {
         // 1. Extract Spreadsheet ID
-        // Regex supports: /d/ID/edit, /d/ID/copy, etc.
         const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
         if (!match || !match[1]) {
             return { added: 0, total: 0, error: "Link Google Sheet không hợp lệ." };
@@ -178,7 +178,6 @@ export const importFlashcardsFromSheet = async (sheetUrl: string): Promise<{ add
         }
 
         // 3. Map Columns
-        // Expected: Từ | Pinyin | Từ Loại | Nghĩa của từ
         const header = rows[0].map(h => h.toLowerCase());
         
         const idxTerm = header.findIndex(h => h.includes('từ') && !h.includes('nghĩa') && !h.includes('loại'));
@@ -203,7 +202,6 @@ export const importFlashcardsFromSheet = async (sheetUrl: string): Promise<{ add
             const phonetic = idxPhonetic !== -1 ? row[idxPhonetic] : "";
             const type = idxType !== -1 ? row[idxType] : "";
             
-            // Nếu cột Từ Loại có dữ liệu, thêm vào phần giải thích
             const explanation = type ? `(${type})` : "";
 
             if (term && meaning) {
@@ -232,14 +230,13 @@ const STORAGE_KEY_LIMIT = 'paperlingo_daily_limit';
 
 export const getDailyLimit = (): number => {
     const stored = localStorage.getItem(STORAGE_KEY_LIMIT);
-    return stored ? parseInt(stored, 10) : 50; // Default 50
+    return stored ? parseInt(stored, 10) : 50; 
 };
 
 export const setDailyLimit = (limit: number) => {
     localStorage.setItem(STORAGE_KEY_LIMIT, limit.toString());
 };
 
-// Đếm số thẻ đã học hôm nay
 const getStudiedCountToday = async (): Promise<number> => {
     const logs = await getReviewLogsFromDB();
     const startOfDay = new Date();
@@ -249,20 +246,19 @@ const getStudiedCountToday = async (): Promise<number> => {
     return logs.filter(l => l.timestamp >= todayTs).length;
 };
 
-// Logic: Chỉ lấy thẻ Due, nhưng lọc theo Daily Limit
 export const getDueFlashcards = async (): Promise<Flashcard[]> => {
   const cards = await getFlashcards();
   const now = Date.now();
   const limit = getDailyLimit();
   
-  // Lấy tất cả thẻ đến hạn
-  const allDue = cards.filter(card => card.nextReview <= now).sort((a,b) => a.nextReview - b.nextReview);
+  // Filter out cards that are "Mastered" (Interval > 10000 days from Easy button)
+  const activeCards = cards.filter(card => card.interval < 10000);
+
+  const allDue = activeCards.filter(card => card.nextReview <= now).sort((a,b) => a.nextReview - b.nextReview);
   
-  // Kiểm tra limit hôm nay
   const studiedToday = await getStudiedCountToday();
   const remainingQuota = Math.max(0, limit - studiedToday);
   
-  // Trả về số thẻ tối đa cho phép
   return allDue.slice(0, remainingQuota);
 };
 
@@ -271,21 +267,23 @@ export const getFlashcardStats = async (): Promise<FlashcardStats> => {
     const now = Date.now();
     const limit = getDailyLimit();
     
-    const allDue = cards.filter(c => c.nextReview <= now);
+    // Filter active vs mastered
+    const activeCards = cards.filter(c => c.interval < 10000);
+    const masteredCards = cards.filter(c => c.interval >= 10000);
+
+    const allDue = activeCards.filter(c => c.nextReview <= now);
     const studiedToday = await getStudiedCountToday();
     
-    // Remaining quota for today
     const remainingQuota = Math.max(0, limit - studiedToday);
-    
     const backlog = Math.max(0, allDue.length - remainingQuota);
 
     return {
         total: cards.length,
         due: allDue.length, 
-        new: cards.filter(c => c.repetitions === 0).length,
-        learning: cards.filter(c => c.repetitions > 0 && c.interval < 21).length, 
-        review: cards.filter(c => c.interval >= 21).length,
-        mastered: cards.filter(c => c.interval > 90).length,
+        new: activeCards.filter(c => c.repetitions === 0).length,
+        learning: activeCards.filter(c => c.repetitions > 0 && c.interval < 21).length, 
+        review: activeCards.filter(c => c.interval >= 21).length,
+        mastered: masteredCards.length,
         
         studiedToday,
         dailyLimit: limit,
@@ -323,9 +321,11 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
     };
 
     cards.forEach(c => {
-        if (c.interval === 0 && c.repetitions === 0) {
+        if (c.interval >= 10000) {
+            counts.mature++; // Mastered count as mature/done
+        } else if (c.interval === 0 && c.repetitions === 0) {
             counts.new++;
-        } else if (c.interval < 1) { // Interval < 1 day = Learning
+        } else if (c.interval < 1) { 
             counts.learning++;
         } else if (c.interval < 21) {
             counts.young++;
@@ -339,22 +339,23 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
     const forecastLabels = new Array(31).fill('').map((_, i) => i === 0 ? 'Today' : `+${i}d`);
     
     cards.forEach(c => {
-        if (c.nextReview > now) {
+        if (c.nextReview > now && c.interval < 10000) {
             const diffTime = Math.abs(c.nextReview - now);
             const diffDays = Math.ceil(diffTime / ONE_DAY);
             if (diffDays <= 30) {
                 forecastMap[diffDays]++;
             }
-        } else {
+        } else if (c.nextReview <= now && c.interval < 10000) {
              forecastMap[0]++;
         }
     });
 
-    // 4. INTERVALS (Distribution)
+    // 4. INTERVALS
     const intervalBuckets = [0, 0, 0, 0, 0, 0, 0];
     const intervalLabels = ['0-1d', '2-7d', '8-30d', '1-3m', '3-6m', '6m-1y', '>1y'];
     
     cards.forEach(c => {
+        if (c.interval >= 10000) return; // Don't chart mastered cards in intervals
         const days = c.interval;
         if (days <= 1) intervalBuckets[0]++;
         else if (days <= 7) intervalBuckets[1]++;
@@ -373,14 +374,13 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
     };
 };
 
-// --- SM-2 ALGORITHM WITH ANKI LEARNING STEPS ---
+// --- PREVIEW HELPER ---
 
-// Helper để tính toán mô phỏng (dùng cho việc hiển thị nhãn nút bấm)
 export const getIntervalPreviewText = (card: Flashcard, rating: ReviewRating): string => {
+    // We calculate a simulation
     const { interval } = calculateNextReview(card, rating, true);
     
-    // Nếu interval rất lớn (>10000 ngày) tức là Easy (Bỏ qua)
-    if (interval > 10000) return "Xong";
+    if (interval >= 10000) return "Xong"; // "Done" or "Mastered"
 
     if (interval < 1) {
         // Minutes
@@ -394,8 +394,8 @@ export const getIntervalPreviewText = (card: Flashcard, rating: ReviewRating): s
     }
 };
 
-// Hàm tính toán cốt lõi
-// isPreview = true: Chỉ tính toán trả về, không làm thay đổi trạng thái
+// --- CORE SRS ALGORITHM (Modified SM-2) ---
+
 export const calculateNextReview = (
     card: Flashcard, 
     rating: ReviewRating, 
@@ -405,65 +405,66 @@ export const calculateNextReview = (
     let { interval, easeFactor, repetitions, step = 0 } = card;
     const now = Date.now();
 
-    // SPECIAL LOGIC: EASY BUTTON -> SKIP FOREVER
+    // 1. EASY: SKIP FOREVER (Mastered)
     if (rating === 'easy') {
-        // Gán interval cực lớn (100 năm) để coi như đã thuộc lòng
-        const MASTERED_INTERVAL = 365 * 100; 
-        
         return {
             nextReview: now + (MASTERED_INTERVAL * ONE_DAY),
             interval: MASTERED_INTERVAL,
-            easeFactor, // Ease factor không còn quan trọng
+            easeFactor,
             repetitions: repetitions + 1,
             step: 0
         };
     }
 
-    // Determine State: Learning (< 1 day) vs Review (>= 1 day)
     const isLearning = interval < 1;
 
     if (isLearning) {
         // --- LEARNING PHASE ---
-        // Steps: 1m (0), 10m (1)
+        // Steps: 1m (0), 10m (1) -> Graduate to 1 Day
         
         if (rating === 'again') {
+            // Reset to Step 1 (1m)
             step = 0;
-            interval = LEARNING_STEPS[0] / (24 * 60); // 1 minute in days
+            interval = LEARNING_STEPS[0] / (24 * 60); // 1 minute
         } else if (rating === 'hard') {
-            // Anki behavior: Average of steps or 1.5x previous
+            // Repeat current step or use roughly 6 mins avg
             interval = 6 / (24 * 60); // 6 mins
+            // Do not advance step
         } else if (rating === 'good') {
             if (step < LEARNING_STEPS.length - 1) {
-                // Move to next step
+                // Advance Step (1m -> 10m)
                 step++;
-                interval = LEARNING_STEPS[step] / (24 * 60); // 10 minutes in days
+                interval = LEARNING_STEPS[step] / (24 * 60);
             } else {
-                // Graduate
-                interval = GRADUATING_INTERVAL; // 1 day
+                // Graduate to Review Phase (1 Day)
                 step = 0;
+                interval = GRADUATING_INTERVAL;
             }
         }
 
     } else {
         // --- REVIEW PHASE ---
+        // Card is already graduated (>= 1 day)
         
         if (rating === 'again') {
-            // Lapse: Forgot the card
+            // Lapse: Forgot the card. Back to Re-learning (10m step)
             step = 0;
-            interval = LEARNING_STEPS[1] / (24 * 60); // 10 minutes (Relearning step)
-            easeFactor = Math.max(1.3, easeFactor - 0.2);
+            interval = LEARNING_STEPS[1] / (24 * 60); // 10 mins
+            easeFactor = Math.max(1.3, easeFactor - 0.2); // Penalty
             repetitions = 0;
         } else if (rating === 'hard') {
+            // Tough but remembered. Slow growth.
             interval = interval * 1.2;
-            easeFactor = Math.max(1.3, easeFactor - 0.15);
+            easeFactor = Math.max(1.3, easeFactor - 0.15); // Slight penalty
         } else if (rating === 'good') {
+            // Standard growth
             interval = interval * easeFactor;
+            // No ease change usually on good
         }
     }
 
-    // Update repetitions logic if needed (usually increment on Good/Easy)
-    if (!isPreview) {
-        if (rating !== 'again') repetitions++;
+    if (!isPreview && rating !== 'again') {
+        repetitions++;
     }
 
     return {
@@ -496,7 +497,6 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
   await saveFlashcardToDB(updatedCard);
   saveCloudFlashcard(updatedCard);
   
-  // GHI LOG LỊCH SỬ
   await saveReviewLogToDB({
       id: generateId(),
       cardId,
