@@ -152,7 +152,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       }
 
       return (
-        <div className="relative w-full h-48 pt-6 pb-8 pl-10 pr-4 box-border">
+        <div className="relative w-full h-56 pt-6 pb-8 pl-10 pr-4 box-border">
             {/* Y-Axis Labels (Left) */}
             <div className="absolute left-0 top-6 bottom-8 w-8 flex flex-col justify-between text-[10px] text-slate-400 text-right pr-2 font-mono">
                 <span>{safeMax}</span>
@@ -180,13 +180,13 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                     return (
                         <div key={idx} className="flex-1 flex flex-col justify-end items-center group relative min-w-[2px] h-full">
                             {/* Hover Tooltip */}
-                            <div className="absolute bottom-full mb-1 opacity-0 group-hover:opacity-100 bg-slate-800 text-white text-[10px] px-2 py-1 rounded pointer-events-none z-20 whitespace-nowrap transition-opacity">
-                                Day {labels[idx]}: {total} (Y:{yVal}, M:{mVal})
+                            <div className="absolute bottom-full mb-1 opacity-0 group-hover:opacity-100 bg-slate-800 text-white text-[10px] px-2 py-1 rounded pointer-events-none z-20 whitespace-nowrap transition-opacity shadow-lg">
+                                Day {labels[idx]}: <span className="font-bold">{total}</span> (Y:{yVal}, M:{mVal})
                             </div>
 
                             {/* The Bar */}
                             <div 
-                                className="w-full flex flex-col-reverse rounded-t-[1px] overflow-hidden hover:brightness-95 transition-all" 
+                                className="w-full flex flex-col-reverse rounded-t-[2px] overflow-hidden hover:opacity-80 transition-opacity cursor-crosshair" 
                                 style={{ height: `${heightPercent}%` }}
                             >
                                 {/* Mature (Bottom - Dark Green - Anki Style) */}
@@ -204,7 +204,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                 {ticks.map((tick, i) => (
                     <div 
                         key={i} 
-                        className="absolute top-0 text-[10px] text-slate-500 transform -translate-x-1/2 text-center"
+                        className="absolute top-0 text-[10px] text-slate-500 transform -translate-x-1/2 text-center font-medium"
                         style={{ left: tick.left }}
                     >
                         {tick.label}
@@ -232,20 +232,32 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       )`;
 
       return (
-          <div className="flex flex-col md:flex-row items-center gap-6">
-               <div className="relative w-32 h-32 shrink-0 rounded-full shadow-inner" style={{ background: gradient }}>
-                   <div className="absolute inset-8 bg-white rounded-full flex items-center justify-center">
+          <div className="flex flex-col items-center justify-center p-4">
+               <div className="relative w-40 h-40 shrink-0 rounded-full shadow-inner mb-6 ring-8 ring-slate-50" style={{ background: gradient }}>
+                   <div className="absolute inset-8 bg-white rounded-full flex items-center justify-center shadow-sm">
                        <div className="text-center">
-                           <div className="text-xs text-slate-400 font-bold">Total</div>
-                           <div className="text-xl font-bold text-slate-800">{counts.total}</div>
+                           <div className="text-xs text-slate-400 font-bold uppercase tracking-wider">Tổng số</div>
+                           <div className="text-3xl font-black text-slate-800">{counts.total}</div>
                        </div>
                    </div>
                </div>
-               <div className="grid grid-cols-2 md:grid-cols-1 gap-x-4 gap-y-2 text-xs font-medium">
-                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-sm"></div> New: {counts.new}</div>
-                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-orange-500 rounded-sm"></div> Learning: {counts.learning}</div>
-                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-[#a3e635] rounded-sm"></div> Young: {counts.young}</div>
-                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-[#15803d] rounded-sm"></div> Mature: {counts.mature}</div>
+               <div className="grid grid-cols-2 gap-x-8 gap-y-3 w-full max-w-xs text-xs font-medium">
+                   <div className="flex items-center justify-between">
+                       <span className="flex items-center gap-2 text-slate-600"><div className="w-3 h-3 bg-blue-500 rounded-sm"></div> New</span>
+                       <span className="font-bold">{counts.new}</span>
+                   </div>
+                   <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2 text-slate-600"><div className="w-3 h-3 bg-orange-500 rounded-sm"></div> Learning</span>
+                        <span className="font-bold">{counts.learning}</span>
+                   </div>
+                   <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2 text-slate-600"><div className="w-3 h-3 bg-[#a3e635] rounded-sm"></div> Young</span>
+                        <span className="font-bold">{counts.young}</span>
+                   </div>
+                   <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2 text-slate-600"><div className="w-3 h-3 bg-[#15803d] rounded-sm"></div> Mature</span>
+                        <span className="font-bold">{counts.mature}</span>
+                   </div>
                </div>
           </div>
       )
@@ -257,70 +269,119 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       const forecastSlice = forecastRange === '1m' ? 30 : forecastRange === '3m' ? 90 : 365;
 
       return (
-        <div className="fixed inset-0 z-50 bg-slate-100 flex flex-col md:block overflow-hidden md:overflow-y-auto md:p-4">
-             {/* Mobile Header */}
-             <div className="md:hidden bg-white p-4 border-b border-slate-200 flex justify-between items-center sticky top-0 z-10 shadow-sm">
-                 <h2 className="text-lg font-bold text-slate-800">Thống kê</h2>
-                 <button onClick={onClose} className="text-slate-500 font-bold p-2">✕</button>
+        <div className="fixed inset-0 z-50 bg-slate-100 flex flex-col md:block overflow-hidden md:overflow-y-auto">
+             
+             {/* Sticky Header */}
+             <div className="bg-white px-6 py-4 border-b border-slate-200 sticky top-0 z-20 shadow-sm flex justify-between items-center">
+                 <div className="flex items-center gap-3">
+                     <span className="bg-slate-900 text-white p-2 rounded-lg text-xl">📊</span>
+                     <div>
+                        <h2 className="text-xl font-bold text-slate-800">Bảng thống kê</h2>
+                        <p className="text-xs text-slate-400 font-medium">Theo dõi tiến độ học tập hàng ngày</p>
+                     </div>
+                 </div>
+                 <button 
+                    onClick={onClose} 
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2 rounded-lg font-bold transition-colors text-sm"
+                 >
+                    Đóng
+                 </button>
              </div>
 
-             <div className="w-full max-w-6xl mx-auto space-y-4 md:space-y-6 pb-20 md:pb-10 p-4 md:p-0 overflow-y-auto h-full md:h-auto">
+             <div className="w-full max-w-6xl mx-auto p-4 md:p-8 pb-24 md:pb-10 overflow-y-auto h-full md:h-auto">
                  
-                 {/* Desktop Header */}
-                 <div className="hidden md:flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                     <h2 className="text-xl font-bold text-slate-800">Thống kê & Ôn tập</h2>
-                     <button onClick={onClose} className="text-slate-500 hover:text-slate-800 font-bold px-4">Đóng</button>
-                 </div>
-
                  {stats ? (
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                     <div className="space-y-6">
                          
-                         {/* CARD: HÔM NAY */}
-                         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
-                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Hôm nay</h3>
-                             <div className="flex-1 flex flex-col justify-center items-center text-center space-y-4">
-                                 {queue.length > 0 ? (
-                                     <>
-                                        <div className="text-4xl font-black text-slate-800">{queue.length}</div>
-                                        <p className="text-slate-500 text-sm">thẻ cần ôn tập.</p>
-                                        <button 
-                                            onClick={() => setView('review')}
-                                            className="w-full md:w-auto px-10 py-3 bg-slate-900 text-white font-bold rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
-                                        >
-                                            Bắt đầu học
-                                        </button>
-                                     </>
-                                 ) : (
-                                     <div className="py-8">
-                                         <div className="text-4xl mb-2">🎉</div>
-                                         <p className="text-slate-800 font-bold">Đã hoàn thành!</p>
-                                         <p className="text-slate-400 text-sm">Không còn thẻ nào cho hôm nay.</p>
-                                     </div>
-                                 )}
+                         {/* TOP ROW: TODAY & COUNTS */}
+                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                             
+                             {/* 1. HÔM NAY (TODAY) - HERO CARD */}
+                             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col lg:col-span-2">
+                                 <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                         <span>📅</span> Hôm nay
+                                     </h3>
+                                     <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tiến độ ngày</div>
+                                 </div>
                                  
-                                 <div className="mt-4 pt-4 border-t w-full text-xs text-slate-500 flex justify-between px-2">
-                                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-300"></span> Đã học: {stats.today.studied}</span>
-                                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400"></span> Lại: {stats.today.againCount}</span>
+                                 <div className="p-8 flex-1 flex flex-col md:flex-row items-center justify-between gap-8">
+                                     <div className="text-center md:text-left">
+                                         {queue.length > 0 ? (
+                                             <>
+                                                 <div className="text-6xl font-black text-slate-900 mb-2">{queue.length}</div>
+                                                 <div className="text-lg text-slate-500 font-medium mb-1">thẻ cần ôn tập ngay</div>
+                                                 <p className="text-xs text-slate-400">Đừng để dồn bài nhé!</p>
+                                             </>
+                                         ) : (
+                                             <>
+                                                 <div className="text-5xl mb-2">🎉</div>
+                                                 <div className="text-xl font-bold text-slate-800">Tuyệt vời!</div>
+                                                 <div className="text-slate-500">Bạn đã hoàn thành mục tiêu hôm nay.</div>
+                                             </>
+                                         )}
+                                     </div>
+
+                                     <div className="flex-1 w-full max-w-sm space-y-4">
+                                         {queue.length > 0 && (
+                                            <button 
+                                                onClick={() => setView('review')}
+                                                className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:scale-[1.02] transition-all active:scale-95 text-lg flex items-center justify-center gap-2"
+                                            >
+                                                <span>✍️</span> Bắt đầu học ngay
+                                            </button>
+                                         )}
+                                         
+                                         <div className="grid grid-cols-2 gap-4">
+                                             <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                                                 <div className="text-2xl font-bold text-slate-700">{stats.today.studied}</div>
+                                                 <div className="text-[10px] text-slate-400 uppercase font-bold">Đã học</div>
+                                             </div>
+                                             <div className="bg-red-50 p-3 rounded-xl border border-red-100 text-center">
+                                                 <div className="text-2xl font-bold text-red-600">{stats.today.againCount}</div>
+                                                 <div className="text-[10px] text-red-400 uppercase font-bold">Quên bài</div>
+                                             </div>
+                                         </div>
+                                     </div>
                                  </div>
                              </div>
+
+                             {/* 2. PHÂN LOẠI (COUNTS) */}
+                             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+                                 <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                         <span>📦</span> Kho thẻ
+                                     </h3>
+                                 </div>
+                                 <div className="flex-1">
+                                     <DonutChart counts={stats.counts} />
+                                 </div>
+                             </div>
+
                          </div>
 
-                         {/* CARD: DỰ BÁO (Updated Anki Style) */}
-                         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
-                             <div className="flex justify-between items-center mb-4 border-b pb-2">
-                                <h3 className="text-lg font-semibold text-slate-800">Dự báo</h3>
-                                <div className="space-x-1 text-[10px] bg-slate-100 p-1 rounded-lg">
-                                    <button onClick={()=>setForecastRange('1m')} className={`px-2 py-1 rounded ${forecastRange==='1m'?'bg-white shadow text-indigo-600':'text-slate-500'}`}>1 tháng</button>
-                                    <button onClick={()=>setForecastRange('3m')} className={`px-2 py-1 rounded ${forecastRange==='3m'?'bg-white shadow text-indigo-600':'text-slate-500'}`}>3 tháng</button>
-                                    <button onClick={()=>setForecastRange('1y')} className={`px-2 py-1 rounded ${forecastRange==='1y'?'bg-white shadow text-indigo-600':'text-slate-500'}`}>1 năm</button>
-                                </div>
-                             </div>
-                             <div className="flex-1 w-full relative">
-                                 <div className="flex justify-end gap-3 text-[10px] mb-2 font-medium">
-                                     <div className="flex items-center gap-1"><div className="w-2 h-2 bg-[#a3e635] border border-slate-200"></div>Young</div>
-                                     <div className="flex items-center gap-1"><div className="w-2 h-2 bg-[#15803d]"></div>Mature</div>
+                         {/* MIDDLE ROW: FORECAST */}
+                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+                             <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-50/50">
+                                 <div>
+                                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                         <span>📈</span> Dự báo tương lai
+                                     </h3>
+                                     <p className="text-xs text-slate-500 mt-0.5">Số lượng thẻ sẽ đến hạn ôn tập trong thời gian tới</p>
                                  </div>
-
+                                 
+                                 <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
+                                     <button onClick={()=>setForecastRange('1m')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${forecastRange==='1m'?'bg-indigo-100 text-indigo-700':'text-slate-500 hover:bg-slate-50'}`}>1 tháng</button>
+                                     <button onClick={()=>setForecastRange('3m')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${forecastRange==='3m'?'bg-indigo-100 text-indigo-700':'text-slate-500 hover:bg-slate-50'}`}>3 tháng</button>
+                                     <button onClick={()=>setForecastRange('1y')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${forecastRange==='1y'?'bg-indigo-100 text-indigo-700':'text-slate-500 hover:bg-slate-50'}`}>1 năm</button>
+                                 </div>
+                             </div>
+                             
+                             <div className="p-2">
+                                 <div className="flex justify-end gap-4 text-xs font-medium px-6 py-2">
+                                     <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#a3e635]"></span>Young (Đang học)</div>
+                                     <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#15803d]"></span>Mature (Đã thuộc)</div>
+                                 </div>
                                  <StackedForecastChart 
                                     young={stats.forecast.young.slice(0, forecastSlice)} 
                                     mature={stats.forecast.mature.slice(0, forecastSlice)}
@@ -329,93 +390,103 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                              </div>
                          </div>
 
-                         {/* CARD: SỐ LƯỢNG THẺ */}
-                         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
-                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Phân loại thẻ</h3>
-                             <div className="flex-1 flex justify-center items-center">
-                                 <DonutChart counts={stats.counts} />
-                             </div>
-                         </div>
-
-                         {/* CARD: KHOẢNG CÁCH */}
-                         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
-                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Khoảng cách ôn tập</h3>
-                             <div className="flex-1 w-full overflow-hidden">
-                                 <div className="text-center text-xs text-slate-400 mb-2 italic">Phân bố thời gian lặp lại</div>
+                         {/* BOTTOM ROW: INTERVALS & TOOLS */}
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                             
+                             {/* 3. KHOẢNG CÁCH (INTERVALS) */}
+                             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                                 <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                                     <span>⏳</span> Khoảng cách ôn tập
+                                 </h3>
+                                 <p className="text-xs text-slate-500 mb-6">Phân bố thời gian các thẻ được lặp lại</p>
+                                 
                                  <SimpleBarChart 
                                     data={stats.intervals.data} 
                                     labels={stats.intervals.labels}
                                     color="bg-slate-300"
                                  />
                              </div>
-                         </div>
 
-                         {/* CARD: SETTINGS & IMPORT */}
-                         <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                            <div className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xl">🎯</span>
-                                    <span className="text-sm font-bold text-slate-700">Mục tiêu hằng ngày</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    {isEditingLimit ? (
-                                        <>
-                                            <input 
-                                                type="number" 
-                                                value={tempLimit} 
-                                                onChange={(e) => setTempLimit(e.target.value)}
-                                                className="w-16 px-2 py-1 border rounded text-center font-bold"
-                                            />
-                                            <button onClick={handleSaveLimit} className="text-white font-bold text-xs bg-green-500 px-3 py-1.5 rounded shadow">Lưu</button>
-                                        </>
-                                    ) : (
-                                        <button onClick={() => setIsEditingLimit(true)} className="text-indigo-600 font-bold hover:bg-indigo-50 px-3 py-1 rounded border border-indigo-100">
-                                            {stats.today.limit} thẻ / ngày ✏️
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                            
-                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                                {!showImport ? (
-                                    <button 
-                                        onClick={() => setShowImport(true)}
-                                        className="w-full flex items-center justify-center gap-2 text-slate-600 font-bold text-sm hover:text-indigo-600"
-                                    >
-                                        <span className="text-lg">📥</span> Nhập từ Google Sheet
-                                    </button>
-                                ) : (
-                                    <div className="space-y-2">
-                                        <input 
-                                            type="text"
-                                            placeholder="Dán link Google Sheet vào đây..."
-                                            value={importUrl}
-                                            onChange={(e) => setImportUrl(e.target.value)}
-                                            className="w-full px-3 py-2 text-xs border border-indigo-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none"
-                                        />
-                                        <div className="flex gap-2">
+                             {/* 4. CÔNG CỤ (TOOLS) */}
+                             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col justify-between">
+                                 <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                     <span>🛠️</span> Công cụ & Cài đặt
+                                 </h3>
+
+                                 <div className="space-y-4">
+                                     {/* Daily Limit */}
+                                     <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                         <div>
+                                             <div className="text-sm font-bold text-slate-700">Giới hạn học/ngày</div>
+                                             <div className="text-xs text-slate-400">Tránh bị quá tải kiến thức</div>
+                                         </div>
+                                         <div className="flex items-center gap-2">
+                                             {isEditingLimit ? (
+                                                <>
+                                                    <input 
+                                                        type="number" 
+                                                        value={tempLimit} 
+                                                        onChange={(e) => setTempLimit(e.target.value)}
+                                                        className="w-16 px-2 py-1 border rounded text-center font-bold text-sm"
+                                                    />
+                                                    <button onClick={handleSaveLimit} className="text-white font-bold text-xs bg-green-500 px-3 py-1.5 rounded shadow">OK</button>
+                                                </>
+                                            ) : (
+                                                <button onClick={() => setIsEditingLimit(true)} className="text-indigo-600 font-bold hover:bg-white px-3 py-1.5 rounded-lg border border-transparent hover:border-indigo-100 transition-all text-sm">
+                                                    {stats.today.limit} thẻ ✏️
+                                                </button>
+                                            )}
+                                         </div>
+                                     </div>
+
+                                     {/* Import */}
+                                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                         {!showImport ? (
                                             <button 
-                                                onClick={handleImportSheet}
-                                                disabled={importStatus === 'loading'}
-                                                className="flex-1 px-3 py-2 bg-indigo-600 text-white text-xs rounded font-bold disabled:opacity-50 shadow"
+                                                onClick={() => setShowImport(true)}
+                                                className="w-full flex items-center justify-between text-slate-600 font-bold text-sm hover:text-indigo-600 transition-colors"
                                             >
-                                                {importStatus === 'loading' ? 'Đang xử lý...' : 'Nhập ngay'}
+                                                <span>📥 Nhập từ Google Sheet</span>
+                                                <span className="text-xl">›</span>
                                             </button>
-                                            <button onClick={() => setShowImport(false)} className="px-3 py-2 text-xs text-slate-500 bg-gray-100 rounded hover:bg-gray-200">Hủy</button>
-                                        </div>
-                                        {importMsg && (
-                                            <div className={`text-xs p-2 rounded font-medium ${importStatus === 'error' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
-                                                {importMsg}
+                                        ) : (
+                                            <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                                                <div className="text-xs font-bold text-slate-400 uppercase">Dán link Google Sheet (CSV)</div>
+                                                <input 
+                                                    type="text"
+                                                    placeholder="https://docs.google.com/..."
+                                                    value={importUrl}
+                                                    onChange={(e) => setImportUrl(e.target.value)}
+                                                    className="w-full px-3 py-2 text-xs border border-indigo-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                />
+                                                <div className="flex gap-2">
+                                                    <button 
+                                                        onClick={handleImportSheet}
+                                                        disabled={importStatus === 'loading'}
+                                                        className="flex-1 px-3 py-2 bg-indigo-600 text-white text-xs rounded font-bold disabled:opacity-50 shadow"
+                                                    >
+                                                        {importStatus === 'loading' ? 'Processing...' : 'Import'}
+                                                    </button>
+                                                    <button onClick={() => setShowImport(false)} className="px-3 py-2 text-xs text-slate-500 bg-white border border-slate-200 rounded hover:bg-slate-100">Cancel</button>
+                                                </div>
+                                                {importMsg && (
+                                                    <div className={`text-[10px] p-2 rounded font-medium ${importStatus === 'error' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                                                        {importMsg}
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
-                                    </div>
-                                )}
-                            </div>
-                         </div>
+                                     </div>
+                                 </div>
+                             </div>
 
+                         </div>
                      </div>
                  ) : (
-                     <div className="text-center py-20 text-slate-400">Đang tải dữ liệu...</div>
+                     <div className="flex items-center justify-center h-64 text-slate-400">
+                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-400 mr-3"></div>
+                         Đang phân tích dữ liệu...
+                     </div>
                  )}
              </div>
         </div>
