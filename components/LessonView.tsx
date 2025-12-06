@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ProcessedChunk, QuizQuestion } from '../types';
 import { generateLessonForChunk, explainPhrase } from '../services/geminiService';
@@ -122,11 +121,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
   // --- Check Logic ---
   const handleCheck = () => {
       if (!lessonData) return;
-      // Only score translation if input exists (English mode)
-      if (language !== 'zh') {
-          const score = 100; // Mock score logic
-          setTranslationScore(score);
-      }
+      const score = 100; // Mock score logic, simplify for now
+      setTranslationScore(score);
       setShowResult(true);
   };
 
@@ -168,43 +164,37 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                         {lessonData.cleanedSourceText}
                     </p>
                 </div>
-                {/* Tooltip Render */}
+                {/* Tooltip Render (Same as before) */}
                 {selection.show && (
                     <div className="absolute z-50 transform -translate-x-1/2 -translate-y-full" style={{ top: selection.top, left: selection.left }}>
                          {selection.loading ? <div className="bg-slate-900 text-white px-3 py-1 rounded-full">...</div> : 
-                          selection.result && <div className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold max-w-[300px] whitespace-normal shadow-xl border border-slate-700">{selection.result}</div>}
+                          selection.result && <div className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold max-w-[300px] whitespace-normal text-center shadow-xl">{selection.result}</div>}
                     </div>
                 )}
             </div>
 
-            {/* TRANSLATION INPUT - HIDDEN FOR CHINESE */}
-            {language !== 'zh' && (
-                <div className="relative">
-                    <div className="absolute -top-3 left-4 bg-white px-2 z-10"><span className="text-xs font-bold text-slate-400 uppercase">Bản dịch của bạn</span></div>
-                    <textarea
-                        ref={inputRef}
-                        value={userTranslation}
-                        onChange={(e) => setUserTranslation(e.target.value)}
-                        placeholder="Gõ bản dịch..."
-                        className="w-full p-6 rounded-2xl border border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 min-h-[120px] text-lg"
-                        disabled={showResult}
-                    />
-                </div>
-            )}
+            {/* TRANSLATION INPUT */}
+            <div className="relative">
+                <div className="absolute -top-3 left-4 bg-white px-2 z-10"><span className="text-xs font-bold text-slate-400 uppercase">Bản dịch của bạn</span></div>
+                <textarea
+                    ref={inputRef}
+                    value={userTranslation}
+                    onChange={(e) => setUserTranslation(e.target.value)}
+                    placeholder="Gõ bản dịch..."
+                    className="w-full p-6 rounded-2xl border border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 min-h-[120px] text-lg"
+                    disabled={showResult}
+                />
+            </div>
 
             {!showResult ? (
-                <button 
-                    onClick={handleCheck} 
-                    disabled={language !== 'zh' && userTranslation.length < 2} 
-                    className="w-full bg-slate-900 text-white text-lg font-bold py-4 rounded-xl hover:bg-slate-800 transition-all shadow-lg disabled:opacity-50"
-                >
-                    {language === 'zh' ? '✨ Làm trắc nghiệm (Quiz)' : '✨ Kiểm tra & Làm trắc nghiệm'}
+                <button onClick={handleCheck} disabled={userTranslation.length < 2} className="w-full bg-slate-900 text-white text-lg font-bold py-4 rounded-xl hover:bg-slate-800 transition-all shadow-lg">
+                    ✨ Kiểm tra & Làm trắc nghiệm
                 </button>
             ) : (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                     
-                    {/* REFERENCE TRANSLATION - HIDDEN FOR CHINESE */}
-                    {language !== 'zh' && (
+                    {/* REFERENCE TRANSLATION (HIDDEN FOR CHINESE) */}
+                    {lessonData.referenceTranslation && language !== 'zh' && (
                         <div className="bg-green-50/50 border border-green-200 rounded-xl p-6">
                             <h4 className="text-xs font-bold text-green-700 uppercase mb-3">Đáp án tham khảo</h4>
                             <p className="text-green-900 text-lg leading-relaxed">{lessonData.referenceTranslation}</p>
@@ -215,19 +205,19 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                     {lessonData.quiz && lessonData.quiz.length > 0 && (
                         <div className="bg-indigo-50/30 border border-indigo-100 rounded-xl p-6">
                             <h3 className="text-lg font-bold text-indigo-900 mb-4 flex items-center gap-2">
-                                <span>🧠</span> {language === 'zh' ? '測驗 (Quiz)' : 'Trắc nghiệm Đọc hiểu'}
+                                <span>🧠</span> {language === 'zh' ? '閱讀測驗' : 'Trắc nghiệm Đọc hiểu'}
                             </h3>
                             
                             <div className="space-y-6">
                                 {lessonData.quiz.map((q, qIdx) => (
                                     <div key={qIdx} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                        <p className="font-bold text-slate-800 mb-4 text-lg">{qIdx+1}. {q.question}</p>
+                                        <p className="font-bold text-slate-800 mb-4">{qIdx+1}. {q.question}</p>
                                         <div className="space-y-2">
                                             {q.options.map((opt, optIdx) => {
                                                 const isSelected = quizAnswers[qIdx] === optIdx;
                                                 const isCorrect = q.correctAnswer === optIdx;
                                                 
-                                                let btnClass = "w-full text-left p-3 rounded-lg border transition-all text-lg ";
+                                                let btnClass = "w-full text-left p-3 rounded-lg border transition-all ";
                                                 if (quizSubmitted) {
                                                     if (isCorrect) btnClass += "bg-green-100 border-green-500 text-green-800 font-bold";
                                                     else if (isSelected && !isCorrect) btnClass += "bg-red-50 border-red-300 text-red-700";
@@ -265,7 +255,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                                     disabled={quizAnswers.length < lessonData.quiz.length}
                                     className="mt-4 px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50"
                                 >
-                                    {language === 'zh' ? '提交 (Submit)' : 'Nộp bài Trắc nghiệm'}
+                                    {language === 'zh' ? '提交' : 'Nộp bài Trắc nghiệm'}
                                 </button>
                             )}
                         </div>
@@ -274,10 +264,10 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                     {/* FOOTER ACTIONS */}
                     <div className="flex gap-4 pt-4 border-t border-slate-100">
                          <button onClick={() => { setShowResult(false); setQuizSubmitted(false); setQuizAnswers([]); }} className="flex-1 bg-white border border-slate-300 py-3 rounded-xl font-bold hover:bg-slate-50">
-                            {language === 'zh' ? '重做 (Redo)' : 'Làm lại'}
+                            {language === 'zh' ? '重做' : 'Làm lại'}
                         </button>
                         <button onClick={handleFinishChunk} disabled={!quizSubmitted && lessonData.quiz?.length > 0} className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 shadow-lg disabled:opacity-50">
-                            {isLast ? (language === 'zh' ? '完成 (Finish)' : 'Hoàn thành bài học') : (language === 'zh' ? '下一段 (Next) →' : 'Tiếp tục đoạn sau →')}
+                            {isLast ? (language === 'zh' ? '完成' : 'Hoàn thành bài học') : (language === 'zh' ? '下一段 →' : 'Tiếp tục đoạn sau →')}
                         </button>
                     </div>
                 </div>
