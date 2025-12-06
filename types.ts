@@ -49,6 +49,7 @@ export interface Flashcard {
   repetitions: number; // Consecutive correct reviews
 }
 
+// NEW: Log lịch sử ôn tập để vẽ biểu đồ
 export interface ReviewLog {
     id: string;
     cardId: string;
