@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import { extractTextFromPdf } from '../services/pdfService';
 
 interface FileUploadProps {
-  onTextExtracted: (text: string, filename: string) => void;
+  onTextExtracted: (text: string, filename: string, language: 'en' | 'zh') => void;
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({ onTextExtracted }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [language, setLanguage] = useState<'en' | 'zh'>('en');
 
   const processFile = async (file: File) => {
     if (file.type !== 'application/pdf') {
@@ -21,10 +22,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onTextExtracted }) => {
 
     try {
       const text = await extractTextFromPdf(file);
-      if (text.length < 100) {
+      if (text.length < 50) {
         throw new Error("Không tìm thấy văn bản nào có thể đọc được trong PDF này.");
       }
-      onTextExtracted(text, file.name);
+      onTextExtracted(text, file.name, language);
     } catch (err) {
       console.error(err);
       setError('Lỗi khi đọc file PDF. Hãy chắc chắn đây là file chứa văn bản (không phải ảnh scan).');
@@ -58,10 +59,25 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onTextExtracted }) => {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] p-4">
+    <div className="flex flex-col items-center justify-center min-h-[60vh] p-4 animate-in fade-in zoom-in duration-500">
       <div className="text-center mb-8">
         <h1 className="text-4xl font-bold text-slate-800 mb-2">PaperLingo</h1>
-        <p className="text-slate-500">Biến bài báo khoa học thành bài học tiếng Anh dễ dàng.</p>
+        <p className="text-slate-500">Biến bài báo khoa học thành bài học ngôn ngữ tương tác.</p>
+      </div>
+
+      <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-200 mb-6 flex gap-1">
+          <button 
+            onClick={() => setLanguage('en')}
+            className={`px-6 py-2 rounded-lg font-bold text-sm transition-all ${language === 'en' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+          >
+              🇬🇧 Tiếng Anh
+          </button>
+          <button 
+            onClick={() => setLanguage('zh')}
+            className={`px-6 py-2 rounded-lg font-bold text-sm transition-all ${language === 'zh' ? 'bg-red-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+          >
+              🇨🇳 Tiếng Trung (Phồn thể)
+          </button>
       </div>
 
       <div
@@ -70,10 +86,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onTextExtracted }) => {
         onDrop={handleDrop}
         className={`
           w-full max-w-xl p-12 rounded-3xl border-4 border-dashed transition-all duration-300
-          flex flex-col items-center justify-center text-center cursor-pointer
+          flex flex-col items-center justify-center text-center cursor-pointer bg-white
           ${isDragging 
-            ? 'border-primary bg-indigo-50 scale-105' 
-            : 'border-slate-200 hover:border-primary/50 hover:bg-slate-50'
+            ? 'border-indigo-400 bg-indigo-50 scale-105' 
+            : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
           }
         `}
       >
@@ -88,18 +104,18 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onTextExtracted }) => {
         
         <label htmlFor="fileInput" className="cursor-pointer flex flex-col items-center w-full h-full">
             {isLoading ? (
-                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
             ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-slate-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className={`h-16 w-16 mb-4 ${language==='en'?'text-indigo-400':'text-red-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
             )}
           
-          <span className="text-lg font-medium text-slate-700">
-            {isLoading ? 'Đang phân tích bài báo...' : 'Kéo thả file PDF hoặc bấm để chọn'}
+          <span className="text-lg font-bold text-slate-700">
+            {isLoading ? 'Đang phân tích...' : 'Kéo thả file PDF hoặc bấm để chọn'}
           </span>
           <span className="text-sm text-slate-400 mt-2">
-            Hỗ trợ các file PDF văn bản (Academic Papers)
+            {language === 'en' ? 'Hỗ trợ bài báo tiếng Anh (Academic)' : 'Hỗ trợ bài báo tiếng Trung Phồn thể'}
           </span>
         </label>
       </div>

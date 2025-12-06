@@ -5,10 +5,18 @@ export interface KeyTerm {
   meaning: string;
 }
 
+export interface QuizQuestion {
+  question: string;
+  options: string[]; // [A, B, C]
+  correctAnswer: number; // Index 0, 1, or 2
+  explanation: string;
+}
+
 export interface LessonContent {
   cleanedSourceText: string; 
   referenceTranslation: string; 
   keyTerms: KeyTerm[]; 
+  quiz?: QuizQuestion[]; // NEW: Trắc nghiệm
   source?: 'AI' | 'Fallback'; 
 }
 
@@ -23,6 +31,7 @@ export interface SavedPaper {
   id: string; // UUID
   fileName: string;
   originalText: string;
+  language: 'en' | 'zh'; // NEW: Language flag
   processedChunks: ProcessedChunk[];
   currentChunkIndex: number;
   createdAt: number;
