@@ -1,6 +1,6 @@
 
 import { Flashcard, ReviewRating } from "../types";
-import { getFlashcardsFromDB, saveFlashcardToDB, generateId } from "./db";
+import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB } from "./db";
 import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey } from "./firebaseService";
 
 let hasSynced = false;
@@ -20,44 +20,45 @@ export interface FlashcardStats {
 
 export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     setFirebaseSyncKey(key);
+    
+    // QUAN TRỌNG: Khi đăng nhập tài khoản mới, xóa sạch dữ liệu cũ trên máy
+    // để tránh việc dữ liệu của Admin/Guest bị trộn vào tài khoản học viên.
+    await clearAllFlashcardsFromDB();
+    
     hasSynced = false;
-    await getFlashcards();
+    await getFlashcards(); // Tự động tải từ Cloud về sau khi đã dọn sạch
 };
 
 export const getFlashcards = async (): Promise<Flashcard[]> => {
   try {
     let localCards = await getFlashcardsFromDB();
 
-    // Sync logic: Chỉ chạy 1 lần khi mở app (hoặc khi cần thiết)
+    // Sync logic
     if (!hasSynced && navigator.onLine) {
        const cloudCards = await fetchCloudFlashcards();
        
        if (cloudCards.length > 0) {
            const mergedMap = new Map<string, Flashcard>();
            
-           // 1. Đưa local cards vào map trước
+           // Vì ta đã clear DB khi login, nên localCards lúc này thường là rỗng (trừ khi user tự học offline trước đó)
+           // Tuy nhiên vẫn giữ logic merge để an toàn cho trường hợp mất mạng rồi có mạng lại
            localCards.forEach(c => mergedMap.set(c.id, c));
            
-           // 2. Hợp nhất với Cloud cards (Smart Merge)
            for (const cloudCard of cloudCards) {
                const localCard = mergedMap.get(cloudCard.id);
                
                if (!localCard) {
-                   // Nếu máy chưa có -> Lấy từ Cloud về
                    mergedMap.set(cloudCard.id, cloudCard);
                    await saveFlashcardToDB(cloudCard);
                } else {
-                   // Nếu máy đã có -> So sánh xem cái nào "xịn" hơn (học nhiều hơn)
-                   // Ưu tiên bản nào có số lần học (repetitions) lớn hơn hoặc ngày review xa hơn
+                   // Logic merge: lấy cái nào có tiến độ xa hơn
                    const localProgress = (localCard.repetitions || 0) + (localCard.interval || 0);
                    const cloudProgress = (cloudCard.repetitions || 0) + (cloudCard.interval || 0);
                    
                    if (cloudProgress > localProgress) {
-                       // Cloud mới hơn -> Cập nhật Local
                        mergedMap.set(cloudCard.id, cloudCard);
                        await saveFlashcardToDB(cloudCard);
                    } else if (localProgress > cloudProgress) {
-                       // Local mới hơn (học offline) -> Đẩy ngược lên Cloud
                        saveCloudFlashcard(localCard);
                    }
                }
@@ -113,23 +114,20 @@ export const getFlashcardStats = async (): Promise<FlashcardStats> => {
         total: cards.length,
         due: cards.filter(c => c.nextReview <= now).length,
         new: cards.filter(c => c.repetitions === 0).length,
-        learning: cards.filter(c => c.repetitions > 0 && c.interval < 21).length, // < 3 weeks
+        learning: cards.filter(c => c.repetitions > 0 && c.interval < 21).length, 
         review: cards.filter(c => c.interval >= 21).length,
-        mastered: cards.filter(c => c.interval > 90).length // > 3 months
+        mastered: cards.filter(c => c.interval > 90).length 
     };
 };
 
 // --- SM-2 ALGORITHM ---
-// Adapted for better short-term steps
 export const calculateNextReview = (card: Flashcard, rating: ReviewRating): { nextReview: number, interval: number, easeFactor: number, repetitions: number } => {
     let { interval, easeFactor, repetitions } = card;
     const now = Date.now();
 
     if (rating === 'again') {
-        // Reset progress
         repetitions = 0;
         interval = 0; 
-        // Next review in 1 minute
         return { 
             nextReview: now + ONE_MINUTE, 
             interval: 0, 
@@ -138,27 +136,20 @@ export const calculateNextReview = (card: Flashcard, rating: ReviewRating): { ne
         };
     }
 
-    // HARD / GOOD / EASY
     if (interval === 0) {
-        // First success
-        interval = 1; // 1 day
+        interval = 1; 
     } else if (interval === 1) {
-        // Second success
-        interval = 6; // 6 days
+        interval = 6; 
     } else {
-        // Subsequent successes
         interval = Math.round(interval * easeFactor);
     }
 
-    // Adjustments based on rating
     if (rating === 'hard') {
-        interval = Math.max(1, Math.round(interval * 0.5)); // Drop interval significantly
+        interval = Math.max(1, Math.round(interval * 0.5));
         easeFactor = Math.max(1.3, easeFactor - 0.15);
     } else if (rating === 'easy') {
-        interval = Math.round(interval * 1.3); // Bonus boost
+        interval = Math.round(interval * 1.3); 
         easeFactor += 0.15;
-    } else {
-        // Good: Standard SM-2 calc
     }
 
     repetitions++;
@@ -185,10 +176,9 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
       interval, 
       easeFactor, 
       repetitions,
-      level: interval > 21 ? 2 : 1 // Simple bucket for UI
+      level: interval > 21 ? 2 : 1 
   };
   
-  // Lưu cả Local và Cloud
   await saveFlashcardToDB(updatedCard);
   saveCloudFlashcard(updatedCard);
 };

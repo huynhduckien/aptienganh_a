@@ -3,12 +3,12 @@ import React, { useState, useEffect } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { LessonView } from './components/LessonView';
 import { Dashboard } from './components/Dashboard';
-import { AdminPanel } from './components/AdminPanel'; // Import AdminPanel
+import { AdminPanel } from './components/AdminPanel'; 
 import { chunkTextByLevel, DifficultyLevel } from './services/pdfService';
 import { ProcessedChunk, SavedPaper, Flashcard } from './types';
 import { saveFlashcard, getDueFlashcards, getFlashcards, setSyncKeyAndSync } from './services/flashcardService';
 import { FlashcardReview } from './components/FlashcardReview';
-import { savePaperToDB, getAllPapersFromDB, updatePaperProgress, deletePaperFromDB, generateId } from './services/db';
+import { savePaperToDB, getAllPapersFromDB, updatePaperProgress, deletePaperFromDB, generateId, clearAllFlashcardsFromDB } from './services/db';
 import { verifyStudentKey } from './services/firebaseService';
 
 type AppState = 'dashboard' | 'upload' | 'level_select' | 'study';
@@ -28,7 +28,7 @@ const App: React.FC = () => {
   const [dictionary, setDictionary] = useState<{term: string, meaning: string, explanation: string, phonetic: string} | null>(null);
   const [dueCards, setDueCards] = useState<Flashcard[]>([]);
   const [showFlashcards, setShowFlashcards] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false); // State for Admin Panel
+  const [showAdmin, setShowAdmin] = useState(false); 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'exists'>('idle');
   
   // Sync Data
@@ -59,10 +59,16 @@ const App: React.FC = () => {
   // Handle Sync Key Change
   const handleSetSyncKey = async (key: string) => {
       if (!key) {
-          // Logout logic
-          localStorage.removeItem('paperlingo_sync_key');
-          setSyncKey(null);
-          window.location.reload(); // Refresh to clear memory state
+          // LOGOUT LOGIC
+          if (confirm('Bạn có chắc chắn muốn đăng xuất? Dữ liệu trên máy này sẽ được xóa để bảo mật.')) {
+              localStorage.removeItem('paperlingo_sync_key');
+              setSyncKey(null);
+              // Xóa sạch dữ liệu Flashcard trên máy để người sau không thấy
+              await clearAllFlashcardsFromDB();
+              setDueCards([]); // Reset UI
+              alert("Đã đăng xuất thành công.");
+              window.location.reload(); 
+          }
           return;
       }
 
@@ -75,7 +81,7 @@ const App: React.FC = () => {
 
       setSyncKey(key);
       localStorage.setItem('paperlingo_sync_key', key);
-      await setSyncKeyAndSync(key);
+      await setSyncKeyAndSync(key); // Hàm này giờ sẽ clear DB cũ trước
       await updateDueCount();
       alert(`Đã kích hoạt tài khoản: ${isValid.name}`);
   };

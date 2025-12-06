@@ -1,3 +1,4 @@
+
 import { ProcessedChunk, SavedPaper, Flashcard } from "../types";
 
 const DB_NAME = 'PaperLingoDB';
@@ -82,18 +83,14 @@ export const deletePaperFromDB = async (id: string): Promise<void> => {
       const transaction = db.transaction([STORE_PAPERS], 'readwrite');
       const store = transaction.objectStore(STORE_PAPERS);
       
-      // Thực hiện lệnh xóa
       store.delete(id);
   
-      // Quan trọng: Đợi transaction hoàn tất hẳn rồi mới resolve
-      // Điều này ngăn chặn việc đọc lại dữ liệu khi việc xóa chưa xong
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
 };
 
 export const updatePaperProgress = async (id: string, chunks: ProcessedChunk[], currentChunkIndex: number): Promise<void> => {
-    // Với update, chúng ta cần cẩn thận không ghi đè nếu paper đã bị xóa
     try {
         const paper = await getPaperFromDB(id);
         if (paper) {
@@ -133,4 +130,17 @@ export const getFlashcardsFromDB = async (): Promise<Flashcard[]> => {
 
 export const updateFlashcardInDB = async (card: Flashcard): Promise<void> => {
     return saveFlashcardToDB(card);
+};
+
+// NEW: Hàm xóa sạch Flashcard để dùng khi switch tài khoản
+export const clearAllFlashcardsFromDB = async (): Promise<void> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_FLASHCARDS], 'readwrite');
+        const store = tx.objectStore(STORE_FLASHCARDS);
+        const request = store.clear(); // Xóa sạch dữ liệu trong store
+        
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
 };
