@@ -1,5 +1,4 @@
 
-
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
 import { translateTextFallback } from "./translationService";
@@ -134,9 +133,9 @@ export const generateLessonForChunk = async (textChunk: string, language: 'en' |
 
                 TASKS:
                 1. "cleanedSourceText": Fix format/newlines. KEEP in Traditional Chinese.
-                2. "referenceTranslation": Translate to Vietnamese.
+                2. "referenceTranslation": Return an empty string "". DO NOT TRANSLATE.
                 3. "keyTerms": Extract 3 difficult terms (Chinese + Pinyin + Vietnamese meaning).
-                4. "quiz": Generate 2 multiple choice questions (A, B, C) in Vietnamese to test comprehension of this chunk.
+                4. "quiz": Generate 2 multiple choice questions (A, B, C) entirely in Traditional Chinese to test comprehension.
                 `;
             } else {
                 taskPrompt = `
@@ -186,6 +185,81 @@ export interface DictionaryResponse {
 }
 
 export const explainPhrase = async (phrase: string, fullContext: string): Promise<DictionaryResponse> => {
-    // Keep existing implementation
-    return { shortMeaning: "...", detailedExplanation: "...", phonetic: "" };
-}
+    if (dictionaryCache.has(phrase.toLowerCase())) {
+        return dictionaryCache.get(phrase.toLowerCase())!;
+    }
+
+    if (!checkRateLimit()) {
+        return {
+            shortMeaning: "Đang tải...",
+            phonetic: "",
+            detailedExplanation: "Bạn đang tra quá nhanh. Vui lòng đợi giây lát hoặc sử dụng Google Dịch."
+        };
+    }
+
+    const isValidKey = apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init";
+
+    // PROMPT DÀNH RIÊNG CHO TỪ ĐIỂN
+    // Yêu cầu: ShortMeaning chỉ là tiếng Việt, max 5-7 từ. DetailedExplanation bao gồm loại từ và ngữ cảnh.
+    const prompt = `
+    Role: Dictionary.
+    Term: "${phrase}"
+    Context: "${fullContext}"
+
+    REQUIREMENTS:
+    1. "shortMeaning": PURE Vietnamese meaning only. Max 7 words. NO brackets. NO parts of speech. Example: "Sự phân tầng xã hội" (Not "Sự phân tầng (Noun)").
+    2. "phonetic": IPA format.
+    3. "detailedExplanation": Format: "[Part of Speech] Meaning. Contextual usage." (Max 2 sentences).
+
+    Return JSON.
+    `;
+    
+    // Schema đơn giản cho từ điển
+    const dictSchema: Schema = {
+        type: Type.OBJECT,
+        properties: {
+            shortMeaning: { type: Type.STRING },
+            phonetic: { type: Type.STRING },
+            detailedExplanation: { type: Type.STRING }
+        },
+        required: ["shortMeaning", "phonetic", "detailedExplanation"]
+    };
+
+    try {
+        if (isValidKey) {
+            const response = await withRetry(() => ai.models.generateContent({
+                model: MODEL_NAME,
+                contents: prompt,
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: dictSchema,
+                }
+            }));
+            
+            const raw = extractJSON(response.text || "{}");
+            
+            // CLEANING LOGIC (Hậu xử lý để đảm bảo Tooltip sạch)
+            let cleanShort = raw.shortMeaning || "";
+            // 1. Xóa nội dung trong ngoặc đơn/vuông
+            cleanShort = cleanShort.replace(/[\(\[].*?[\)\]]/g, "");
+            // 2. Xóa các ký tự thừa
+            cleanShort = cleanShort.trim();
+
+            const result: DictionaryResponse = {
+                shortMeaning: cleanShort,
+                phonetic: (raw.phonetic || "").replace(/\//g, ''), // Xóa dấu / nếu AI tự thêm vì UI đã có
+                detailedExplanation: raw.detailedExplanation || "",
+                originalTerm: phrase
+            };
+
+            dictionaryCache.set(phrase.toLowerCase(), result);
+            saveCacheToStorage();
+            saveCloudDictionaryItem(phrase, result);
+            return result;
+        } else {
+             throw new Error("No Key");
+        }
+    } catch (e) {
+        return fetchVietnameseFallback(phrase);
+    }
+};
