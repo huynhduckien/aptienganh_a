@@ -10,9 +10,6 @@ let hasSynced = false;
 const ONE_MINUTE = 60 * 1000;
 const ONE_DAY = 24 * 60 * 60 * 1000;
 
-// Config limit
-const DAILY_LIMIT = 50; 
-
 export interface FlashcardStats {
     total: number;
     due: number;
@@ -24,13 +21,15 @@ export interface FlashcardStats {
     // Daily Limit Info
     studiedToday: number;
     dailyLimit: number;
-    backlog: number; // Nợ bài
+    backlog: number; // Nợ bài (số bài due nhưng bị ẩn do giới hạn ngày)
 }
 
 export interface ChartData {
     labels: string[];
     values: number[];
 }
+
+// --- SYNC LOGIC ---
 
 export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     setFirebaseSyncKey(key);
@@ -110,20 +109,17 @@ export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'next
   return true;
 };
 
-// Logic: Chỉ lấy thẻ Due, nhưng lọc theo Daily Limit
-export const getDueFlashcards = async (): Promise<Flashcard[]> => {
-  const cards = await getFlashcards();
-  const now = Date.now();
-  
-  // Lấy tất cả thẻ đến hạn
-  const allDue = cards.filter(card => card.nextReview <= now).sort((a,b) => a.nextReview - b.nextReview);
-  
-  // Kiểm tra limit hôm nay
-  const studiedToday = await getStudiedCountToday();
-  const remainingQuota = Math.max(0, DAILY_LIMIT - studiedToday);
-  
-  // Trả về số thẻ tối đa cho phép
-  return allDue.slice(0, remainingQuota);
+// --- DAILY LIMIT & SETTINGS ---
+
+const STORAGE_KEY_LIMIT = 'paperlingo_daily_limit';
+
+export const getDailyLimit = (): number => {
+    const stored = localStorage.getItem(STORAGE_KEY_LIMIT);
+    return stored ? parseInt(stored, 10) : 50; // Default 50
+};
+
+export const setDailyLimit = (limit: number) => {
+    localStorage.setItem(STORAGE_KEY_LIMIT, limit.toString());
 };
 
 // Đếm số thẻ đã học hôm nay
@@ -136,51 +132,101 @@ const getStudiedCountToday = async (): Promise<number> => {
     return logs.filter(l => l.timestamp >= todayTs).length;
 };
 
+// Logic: Chỉ lấy thẻ Due, nhưng lọc theo Daily Limit
+export const getDueFlashcards = async (): Promise<Flashcard[]> => {
+  const cards = await getFlashcards();
+  const now = Date.now();
+  const limit = getDailyLimit();
+  
+  // Lấy tất cả thẻ đến hạn
+  const allDue = cards.filter(card => card.nextReview <= now).sort((a,b) => a.nextReview - b.nextReview);
+  
+  // Kiểm tra limit hôm nay
+  const studiedToday = await getStudiedCountToday();
+  const remainingQuota = Math.max(0, limit - studiedToday);
+  
+  // Trả về số thẻ tối đa cho phép
+  return allDue.slice(0, remainingQuota);
+};
+
 export const getFlashcardStats = async (): Promise<FlashcardStats> => {
     const cards = await getFlashcards();
     const now = Date.now();
+    const limit = getDailyLimit();
     
     const allDue = cards.filter(c => c.nextReview <= now);
     const studiedToday = await getStudiedCountToday();
     
-    // Backlog là tổng số nợ - số lượng cho phép hôm nay (nếu nợ quá nhiều)
-    // Hoặc đơn giản là tổng số Due
-    const backlog = Math.max(0, allDue.length - (DAILY_LIMIT - studiedToday));
+    // Remaining quota for today
+    const remainingQuota = Math.max(0, limit - studiedToday);
+    
+    // Backlog: Số lượng thẻ Due thực tế - Số lượng thẻ được phép học hôm nay
+    // Nếu Backlog > 0 nghĩa là kể cả học hết hôm nay vẫn còn nợ sang hôm sau
+    const backlog = Math.max(0, allDue.length - remainingQuota);
 
     return {
         total: cards.length,
-        due: allDue.length,
+        due: allDue.length, // Total real due
         new: cards.filter(c => c.repetitions === 0).length,
         learning: cards.filter(c => c.repetitions > 0 && c.interval < 21).length, 
         review: cards.filter(c => c.interval >= 21).length,
         mastered: cards.filter(c => c.interval > 90).length,
         
         studiedToday,
-        dailyLimit: DAILY_LIMIT,
+        dailyLimit: limit,
         backlog
     };
 };
 
-export const getStudyHistoryChart = async (): Promise<ChartData> => {
+export const getStudyHistoryChart = async (range: 'week' | 'month' | 'year'): Promise<ChartData> => {
     const logs = await getReviewLogsFromDB();
     const labels: string[] = [];
     const values: number[] = [];
     
-    // Lấy 7 ngày gần nhất
-    for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        d.setHours(0,0,0,0);
+    if (range === 'year') {
+        // 12 months
+        for (let i = 11; i >= 0; i--) {
+            const d = new Date();
+            d.setMonth(d.getMonth() - i);
+            d.setDate(1);
+            d.setHours(0,0,0,0);
+            
+            const monthStart = d.getTime();
+            
+            // End of month
+            const nextMonth = new Date(d);
+            nextMonth.setMonth(nextMonth.getMonth() + 1);
+            const monthEnd = nextMonth.getTime();
+
+            const count = logs.filter(l => l.timestamp >= monthStart && l.timestamp < monthEnd).length;
+            
+            const label = d.toLocaleDateString('vi-VN', { month: 'short' }); // Thg 1...
+            labels.push(label);
+            values.push(count);
+        }
+    } else {
+        // Week (7 days) or Month (30 days)
+        const days = range === 'month' ? 30 : 7;
         
-        const dayStart = d.getTime();
-        const dayEnd = dayStart + ONE_DAY;
-        
-        const count = logs.filter(l => l.timestamp >= dayStart && l.timestamp < dayEnd).length;
-        
-        // Format: Mon, Tue or 12/05
-        const label = d.toLocaleDateString('vi-VN', { weekday: 'short' }); // T2, T3...
-        labels.push(label);
-        values.push(count);
+        for (let i = days - 1; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            d.setHours(0,0,0,0);
+            
+            const dayStart = d.getTime();
+            const dayEnd = dayStart + ONE_DAY;
+            
+            const count = logs.filter(l => l.timestamp >= dayStart && l.timestamp < dayEnd).length;
+            
+            // Format: Mon (Week) or 01/05 (Month)
+            const options: Intl.DateTimeFormatOptions = range === 'month' 
+                ? { day: '2-digit', month: '2-digit' }
+                : { weekday: 'short' };
+                
+            const label = d.toLocaleDateString('vi-VN', options); 
+            labels.push(label);
+            values.push(count);
+        }
     }
     
     return { labels, values };

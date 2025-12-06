@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Flashcard, ReviewRating } from '../types';
-import { updateCardStatus, getFlashcardStats, FlashcardStats, getStudyHistoryChart, ChartData } from '../services/flashcardService';
+import { updateCardStatus, getFlashcardStats, FlashcardStats, getStudyHistoryChart, ChartData, setDailyLimit } from '../services/flashcardService';
 
 interface FlashcardReviewProps {
   cards: Flashcard[]; // These are the DUE cards
@@ -16,17 +16,33 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [stats, setStats] = useState<FlashcardStats | null>(null);
-  const [chartData, setChartData] = useState<ChartData | null>(null);
   
+  // Charts & Settings
+  const [chartData, setChartData] = useState<ChartData | null>(null);
+  const [chartRange, setChartRange] = useState<'week' | 'month' | 'year'>('week');
+  const [isEditingLimit, setIsEditingLimit] = useState(false);
+  const [tempLimit, setTempLimit] = useState('50');
+
   // Session stats
   const [sessionCorrect, setSessionCorrect] = useState(0);
 
   useEffect(() => {
-    // Refresh stats when component mounts
-    getFlashcardStats().then(setStats);
-    getStudyHistoryChart().then(setChartData);
+    refreshStats();
     setQueue(dueCards);
   }, [dueCards]);
+
+  useEffect(() => {
+      // Re-fetch chart when range changes
+      getStudyHistoryChart(chartRange).then(setChartData);
+  }, [chartRange]);
+
+  const refreshStats = async () => {
+      const s = await getFlashcardStats();
+      setStats(s);
+      setTempLimit(s.dailyLimit.toString());
+      const c = await getStudyHistoryChart(chartRange);
+      setChartData(c);
+  };
 
   const playAudio = (text: string) => {
     window.speechSynthesis.cancel();
@@ -52,6 +68,16 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       setView('summary');
       onUpdate();
     }
+  };
+
+  const handleSaveLimit = () => {
+      const val = parseInt(tempLimit);
+      if (val > 0) {
+          setDailyLimit(val);
+          setIsEditingLimit(false);
+          refreshStats();
+          onUpdate(); // Re-fetch due cards
+      }
   };
 
   const formatInterval = (days: number): string => {
@@ -86,7 +112,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   if (view === 'overview') {
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
-             <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-6 md:p-8 animate-in zoom-in duration-300 overflow-y-auto max-h-[90vh]">
+             <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl p-6 md:p-8 animate-in zoom-in duration-300 overflow-y-auto max-h-[90vh]">
                  <div className="flex justify-between items-center mb-6">
                      <h2 className="text-2xl font-bold text-slate-800">Thống kê học tập</h2>
                      <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-2 text-xl">✕</button>
@@ -99,15 +125,35 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
                              <div className="flex justify-between items-end mb-2">
                                  <div>
-                                     <h3 className="text-sm font-bold text-slate-500 uppercase">Hôm nay</h3>
+                                     <h3 className="text-sm font-bold text-slate-500 uppercase flex items-center gap-2">
+                                         Tiến độ Hôm nay
+                                         {isEditingLimit ? (
+                                             <div className="flex items-center gap-2 ml-2">
+                                                <input 
+                                                    type="number" 
+                                                    value={tempLimit} 
+                                                    onChange={(e)=>setTempLimit(e.target.value)} 
+                                                    className="w-16 px-2 py-1 text-sm border rounded"
+                                                />
+                                                <button onClick={handleSaveLimit} className="text-green-600 text-xs font-bold">Lưu</button>
+                                             </div>
+                                         ) : (
+                                             <button onClick={() => setIsEditingLimit(true)} className="text-indigo-500 text-xs hover:underline" title="Chỉnh giới hạn">
+                                                 (Giới hạn: {stats.dailyLimit}) 🖊️
+                                             </button>
+                                         )}
+                                     </h3>
                                      <div className="text-3xl font-black text-slate-800">
                                          {stats.studiedToday} <span className="text-lg text-slate-400 font-medium">/ {stats.dailyLimit} thẻ</span>
                                      </div>
                                  </div>
                                  <div className="text-right">
                                      {stats.backlog > 0 && (
-                                         <div className="text-red-500 font-bold text-sm bg-red-50 px-3 py-1 rounded-full border border-red-100 mb-1">
-                                             ⚠️ Nợ bài: {stats.backlog} thẻ
+                                         <div className="flex flex-col items-end animate-pulse">
+                                             <div className="text-red-500 font-bold text-sm bg-red-50 px-3 py-1 rounded-full border border-red-100 mb-1">
+                                                 ⚠️ Nợ bài: {stats.backlog} thẻ
+                                             </div>
+                                             <span className="text-[10px] text-red-400">Bạn đã bỏ lỡ bài ôn tập</span>
                                          </div>
                                      )}
                                  </div>
@@ -123,26 +169,42 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                          {/* Chart Section */}
                          {chartData && (
                             <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-                                <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Hoạt động 7 ngày qua</h3>
-                                <div className="flex items-end justify-between h-32 gap-2">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-sm font-bold text-slate-400 uppercase">Biểu đồ ôn tập</h3>
+                                    <div className="flex bg-slate-100 p-1 rounded-lg">
+                                        {(['week', 'month', 'year'] as const).map(r => (
+                                            <button 
+                                                key={r}
+                                                onClick={() => setChartRange(r)}
+                                                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${chartRange === r ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                                            >
+                                                {r === 'week' ? 'Tuần' : r === 'month' ? 'Tháng' : 'Năm'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="flex items-end justify-between h-40 gap-1 pb-2 overflow-x-auto">
                                     {chartData.values.map((val, idx) => {
-                                        const max = Math.max(...chartData.values, 10); // Scale
+                                        const max = Math.max(...chartData.values, 5); // Scale
                                         const height = (val / max) * 100;
                                         return (
-                                            <div key={idx} className="flex-1 flex flex-col items-center group">
+                                            <div key={idx} className="flex-1 min-w-[20px] flex flex-col items-center group">
                                                 <div className="relative w-full flex justify-center items-end h-full">
                                                     <div 
-                                                        className="w-full bg-indigo-100 rounded-t-md group-hover:bg-indigo-300 transition-colors relative"
-                                                        style={{ height: `${Math.max(4, height)}%` }}
+                                                        className="w-full mx-0.5 bg-indigo-100 rounded-t-sm group-hover:bg-indigo-300 transition-colors relative"
+                                                        style={{ height: `${Math.max(2, height)}%` }}
                                                     >
                                                         {val > 0 && (
-                                                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] py-0.5 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                {val}
+                                                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] py-0.5 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">
+                                                                {val} thẻ
                                                             </div>
                                                         )}
                                                     </div>
                                                 </div>
-                                                <span className="text-[10px] text-slate-400 font-bold mt-2 uppercase">{chartData.labels[idx]}</span>
+                                                {/* Only show label for every nth item if too many */}
+                                                {(chartRange === 'week' || chartRange === 'year' || idx % 5 === 0) && (
+                                                     <span className="text-[9px] text-slate-400 font-bold mt-2 uppercase truncate w-full text-center">{chartData.labels[idx]}</span>
+                                                )}
                                             </div>
                                         )
                                     })}
@@ -171,7 +233,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                     className="w-full mt-6 py-4 bg-slate-900 text-white font-bold text-lg rounded-xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-slate-300 transition-all active:scale-95 flex items-center justify-center gap-2"
                  >
                     {stats && stats.studiedToday >= stats.dailyLimit && queue.length > 0 ? (
-                        <><span>⚠️</span> Vượt chỉ tiêu ({queue.length} thẻ)</>
+                        <><span>⚠️</span> Vượt chỉ tiêu ngày ({queue.length} thẻ)</>
                     ) : (
                         queue.length > 0 ? `Bắt đầu ôn tập (${queue.length} thẻ)` : 'Không có thẻ nào cần ôn'
                     )}
