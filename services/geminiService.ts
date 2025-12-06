@@ -15,6 +15,7 @@ if (!apiKey || apiKey.length < 10) {
 } 
 
 const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_init" });
+// Model
 const MODEL_NAME = "gemini-2.0-flash-lite-preview-02-05";
 
 // --- PERSISTENT CACHE (Local + Cloud) ---
@@ -235,13 +236,15 @@ export const generateLessonForChunk = async (textChunk: string): Promise<LessonC
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: `
-                Translate to Vietnamese (Academic style).
-                INPUT: "${textChunk}"
+                You are an academic English assistant.
+                INPUT TEXT: "${textChunk}"
+
                 TASKS:
-                1. Clean PDF artifacts.
-                2. Translate to Vietnamese.
-                3. Extract 3 difficult terms.
-                Return JSON.
+                1. "cleanedSourceText": Clean the INPUT text (fix line breaks, remove PDF artifacts). **MUST REMAIN IN ENGLISH**. Do NOT translate this field.
+                2. "referenceTranslation": Translate the cleaned English text into Vietnamese (Academic style).
+                3. "keyTerms": Extract 3 difficult terms (English term + Vietnamese meaning).
+
+                Return JSON only.
                 `,
                 config: {
                     responseMimeType: "application/json",

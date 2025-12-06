@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ProcessedChunk } from '../types';
 import { generateLessonForChunk, explainPhrase } from '../services/geminiService';
@@ -225,11 +226,12 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                 <div 
                     className="bg-[#fdfbf7] px-8 py-8 md:py-10 md:px-10 rounded-2xl border border-stone-200 shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)] cursor-text transition-all hover:border-indigo-300 relative overflow-hidden"
                     onMouseUp={handleTextMouseUp}
+                    translate="no" // Prevent browser auto-translation
                 >
                     <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-indigo-500 opacity-80"></div>
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-bold text-slate-300 pointer-events-none uppercase tracking-wider">Source Text</div>
                     
-                    <p className="font-serif text-[1.35rem] leading-loose text-slate-800 tracking-normal antialiased selection:bg-indigo-100 selection:text-indigo-900">
+                    <p className="font-serif text-[1.35rem] leading-loose text-slate-800 tracking-normal antialiased selection:bg-indigo-100 selection:text-indigo-900 notranslate">
                         {lessonData.cleanedSourceText}
                     </p>
                 </div>
@@ -245,7 +247,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                                 <div className="animate-spin h-2 w-2 border-2 border-white border-t-transparent rounded-full"></div>
                             </div>
                         ) : selection.result ? (
-                            <div className="mb-2 w-max max-w-[280px] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
+                            <div className="mb-2 w-max max-w-[300px] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
                                 <div className="bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl border border-slate-700 relative text-center">
                                     {/* Display ONLY the shortMeaning */}
                                     <div className="font-bold text-sm leading-snug break-words whitespace-normal">
