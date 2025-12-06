@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
 import { translateTextFallback } from "./translationService";
@@ -133,9 +134,9 @@ export const generateLessonForChunk = async (textChunk: string, language: 'en' |
 
                 TASKS:
                 1. "cleanedSourceText": Fix format/newlines. KEEP in Traditional Chinese.
-                2. "referenceTranslation": Return an empty string "". DO NOT TRANSLATE.
+                2. "referenceTranslation": Return empty string "". (User does not want translation).
                 3. "keyTerms": Extract 3 difficult terms (Chinese + Pinyin + Vietnamese meaning).
-                4. "quiz": Generate 2 multiple choice questions (A, B, C) entirely in Traditional Chinese to test comprehension.
+                4. "quiz": Generate 2 multiple choice questions (A, B, C) in Traditional Chinese (NOT Vietnamese) to test comprehension of this chunk. The explanation must also be in Traditional Chinese.
                 `;
             } else {
                 taskPrompt = `
@@ -185,81 +186,63 @@ export interface DictionaryResponse {
 }
 
 export const explainPhrase = async (phrase: string, fullContext: string): Promise<DictionaryResponse> => {
-    if (dictionaryCache.has(phrase.toLowerCase())) {
-        return dictionaryCache.get(phrase.toLowerCase())!;
-    }
-
-    if (!checkRateLimit()) {
-        return {
-            shortMeaning: "Đang tải...",
-            phonetic: "",
-            detailedExplanation: "Bạn đang tra quá nhanh. Vui lòng đợi giây lát hoặc sử dụng Google Dịch."
-        };
-    }
-
-    const isValidKey = apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init";
-
-    // PROMPT DÀNH RIÊNG CHO TỪ ĐIỂN
-    // Yêu cầu: ShortMeaning chỉ là tiếng Việt, max 5-7 từ. DetailedExplanation bao gồm loại từ và ngữ cảnh.
+    // Keep existing implementation
+    // PROMPT FOR DICTIONARY
     const prompt = `
-    Role: Dictionary.
-    Term: "${phrase}"
+    Define this phrase in Vietnamese context: "${phrase}"
     Context: "${fullContext}"
-
-    REQUIREMENTS:
-    1. "shortMeaning": PURE Vietnamese meaning only. Max 7 words. NO brackets. NO parts of speech. Example: "Sự phân tầng xã hội" (Not "Sự phân tầng (Noun)").
-    2. "phonetic": IPA format.
-    3. "detailedExplanation": Format: "[Part of Speech] Meaning. Contextual usage." (Max 2 sentences).
-
-    Return JSON.
+    
+    RETURN JSON ONLY:
+    {
+        "shortMeaning": "Nghĩa tiếng Việt ngắn gọn (MAX 5 words). NO brackets () []",
+        "detailedExplanation": "[Loại từ] Định nghĩa chi tiết. Ngữ cảnh.",
+        "phonetic": "/IPA/"
+    }
     `;
     
-    // Schema đơn giản cho từ điển
-    const dictSchema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-            shortMeaning: { type: Type.STRING },
-            phonetic: { type: Type.STRING },
-            detailedExplanation: { type: Type.STRING }
-        },
-        required: ["shortMeaning", "phonetic", "detailedExplanation"]
-    };
+    const isValidKey = apiKey && apiKey.length > 10;
+    
+    // CACHE CHECK
+    const cacheKey = phrase.toLowerCase();
+    if (dictionaryCache.has(cacheKey)) {
+        return dictionaryCache.get(cacheKey)!;
+    }
 
-    try {
-        if (isValidKey) {
-            const response = await withRetry(() => ai.models.generateContent({
+    if (isValidKey) {
+        try {
+            const result = await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: prompt,
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: dictSchema,
+                config: { responseMimeType: "application/json" }
+            });
+            const text = result.text;
+            if (text) {
+                const data = extractJSON(text);
+                
+                // Aggressive Cleaning for Tooltip
+                let cleanShort = cleanShortMeaning(data.shortMeaning || "");
+                // Remove extra notes like "nghĩa là", "dịch là"
+                cleanShort = cleanShort.replace(/^(nghĩa là|dịch là|tức là)\s*/i, '');
+                // Cut off after first comma if too long
+                if (cleanShort.includes(',') && cleanShort.split(' ').length > 6) {
+                    cleanShort = cleanShort.split(',')[0];
                 }
-            }));
-            
-            const raw = extractJSON(response.text || "{}");
-            
-            // CLEANING LOGIC (Hậu xử lý để đảm bảo Tooltip sạch)
-            let cleanShort = raw.shortMeaning || "";
-            // 1. Xóa nội dung trong ngoặc đơn/vuông
-            cleanShort = cleanShort.replace(/[\(\[].*?[\)\]]/g, "");
-            // 2. Xóa các ký tự thừa
-            cleanShort = cleanShort.trim();
 
-            const result: DictionaryResponse = {
-                shortMeaning: cleanShort,
-                phonetic: (raw.phonetic || "").replace(/\//g, ''), // Xóa dấu / nếu AI tự thêm vì UI đã có
-                detailedExplanation: raw.detailedExplanation || "",
-                originalTerm: phrase
-            };
+                const response: DictionaryResponse = {
+                    shortMeaning: cleanShort,
+                    detailedExplanation: data.detailedExplanation || "...",
+                    phonetic: data.phonetic || ""
+                };
+                
+                // Save to Cache & Cloud
+                dictionaryCache.set(cacheKey, response);
+                saveCacheToStorage();
+                saveCloudDictionaryItem(phrase, response);
 
-            dictionaryCache.set(phrase.toLowerCase(), result);
-            saveCacheToStorage();
-            saveCloudDictionaryItem(phrase, result);
-            return result;
-        } else {
-             throw new Error("No Key");
-        }
-    } catch (e) {
-        return fetchVietnameseFallback(phrase);
+                return response;
+            }
+        } catch (e) { console.error(e); }
     }
-};
+
+    return await fetchVietnameseFallback(phrase);
+}
