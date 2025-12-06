@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
 import { translateTextFallback } from "./translationService";
@@ -5,9 +6,11 @@ import { translateTextFallback } from "./translationService";
 // Khởi tạo AI Client
 const apiKey = process.env.API_KEY;
 
-// DEBUG LOGGING
+// DEBUG LOGGING - GIÚP BẠN KIỂM TRA TRÊN VERCEL
+console.log("Checking API Key status:", apiKey ? "✅ Key Found (" + apiKey.substring(0, 5) + "...)" : "❌ Key Missing (Value is empty)");
+
 if (!apiKey || apiKey.length < 10) {
-    console.warn("⚠️ API Key đang bị RỖNG hoặc KHÔNG HỢP LỆ.");
+    console.warn("⚠️ API Key đang bị RỖNG hoặc KHÔNG HỢP LỆ. Web sẽ chạy chế độ Fallback.");
 } 
 
 const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_init" });
@@ -207,8 +210,6 @@ const cleanShortMeaning = (text: string): string => {
     
     // 4. Trim spaces
     cleaned = cleaned.trim();
-    
-    // REMOVED 5-word limit to ensure accuracy
     
     return cleaned;
 };
