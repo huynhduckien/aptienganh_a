@@ -73,6 +73,34 @@ export interface ChartDataPoint {
     easy: number;
 }
 
+// NEW: Cấu trúc dữ liệu cho Dashboard chuẩn Anki
+export interface AnkiStats {
+    today: {
+        studied: number;
+        limit: number;
+        againCount: number;
+        matureCount: number; // Thẻ đã học xong trong ngày
+    };
+    forecast: {
+        // [daysFromNow]: count
+        data: number[]; 
+        labels: string[];
+    };
+    counts: {
+        new: number;       // Chưa học
+        learning: number;  // Đang học (< 21 ngày)
+        young: number;     // < 21 ngày interval
+        mature: number;    // >= 21 ngày interval
+        suspended: number; // Tạm hoãn (nếu có tính năng này sau này)
+        total: number;
+    };
+    intervals: {
+        // Phân phối khoảng cách ôn tập
+        labels: string[];
+        data: number[];
+    };
+}
+
 declare global {
   const pdfjsLib: any;
 }

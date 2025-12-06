@@ -1,8 +1,8 @@
 
 
 import React, { useState, useEffect } from 'react';
-import { Flashcard, ReviewRating, ChartDataPoint } from '../types';
-import { updateCardStatus, getFlashcardStats, FlashcardStats, getStudyHistoryChart, setDailyLimit } from '../services/flashcardService';
+import { Flashcard, ReviewRating, AnkiStats } from '../types';
+import { updateCardStatus, getAnkiStats, setDailyLimit } from '../services/flashcardService';
 
 interface FlashcardReviewProps {
   cards: Flashcard[]; // These are the DUE cards
@@ -15,33 +15,24 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
-  const [stats, setStats] = useState<FlashcardStats | null>(null);
+  const [stats, setStats] = useState<AnkiStats | null>(null);
   
-  // Charts & Settings
-  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
-  const [chartRange, setChartRange] = useState<'week' | 'month' | 'year'>('week');
+  // Settings
   const [isEditingLimit, setIsEditingLimit] = useState(false);
   const [tempLimit, setTempLimit] = useState('50');
 
-  // Session stats
-  const [sessionCorrect, setSessionCorrect] = useState(0);
+  // Chart Filters
+  const [forecastRange, setForecastRange] = useState<'1m' | '3m'>('1m');
 
   useEffect(() => {
     refreshStats();
     setQueue(dueCards);
   }, [dueCards]);
 
-  useEffect(() => {
-      // Re-fetch chart when range changes
-      getStudyHistoryChart(chartRange).then(setChartData);
-  }, [chartRange]);
-
   const refreshStats = async () => {
-      const s = await getFlashcardStats();
+      const s = await getAnkiStats();
       setStats(s);
-      setTempLimit(s.dailyLimit.toString());
-      const c = await getStudyHistoryChart(chartRange);
-      setChartData(c);
+      setTempLimit(s.today.limit.toString());
   };
 
   const playAudio = (text: string) => {
@@ -56,10 +47,6 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
     const currentCard = queue[currentIndex];
     await updateCardStatus(currentCard.id, rating);
     
-    if (rating !== 'again') {
-        setSessionCorrect(prev => prev + 1);
-    }
-
     // Move next
     if (currentIndex < queue.length - 1) {
       setIsFlipped(false);
@@ -88,7 +75,6 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       return `${(days/365).toFixed(1)}y`;
   };
 
-  // Pre-calculate next intervals for button labels
   const getIntervalPreview = (rating: ReviewRating) => {
       const card = queue[currentIndex];
       if (!card) return "";
@@ -108,173 +94,182 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       return formatInterval(interval);
   };
 
+  // --- CHART COMPONENTS (CSS ONLY) ---
+
+  const SimpleBarChart = ({ data, labels, color = 'bg-slate-300' }: { data: number[], labels: string[], color?: string }) => {
+      const max = Math.max(...data, 1);
+      return (
+          <div className="flex items-end justify-between h-32 gap-1 pt-4">
+              {data.map((val, idx) => {
+                   // Skip some bars if too many
+                   if (data.length > 15 && idx % 2 !== 0) return null;
+                   
+                   return (
+                      <div key={idx} className="flex-1 flex flex-col items-center group relative">
+                          <div 
+                              className={`w-full ${color} rounded-t-sm hover:brightness-90 transition-all`}
+                              style={{ height: `${(val / max) * 100}%` }}
+                          ></div>
+                          {/* Label every X items */}
+                          {(data.length <= 10 || idx % 5 === 0) && (
+                              <span className="text-[9px] text-slate-400 mt-1 absolute top-full">{labels[idx]}</span>
+                          )}
+                          {/* Tooltip */}
+                          <div className="absolute bottom-full mb-1 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none z-10 whitespace-nowrap">
+                              {labels[idx]}: {val}
+                          </div>
+                      </div>
+                   )
+              })}
+          </div>
+      )
+  };
+
+  const DonutChart = ({ counts }: { counts: AnkiStats['counts'] }) => {
+      const total = Math.max(counts.total, 1);
+      
+      // Calculate degrees
+      const pNew = (counts.new / total) * 360;
+      const pLearning = (counts.learning / total) * 360;
+      const pYoung = (counts.young / total) * 360;
+      const pMature = (counts.mature / total) * 360;
+
+      // Conic Gradient Logic
+      // New (Blue) -> Learning (Orange) -> Young (Light Green) -> Mature (Dark Green)
+      const gradient = `conic-gradient(
+          #3b82f6 0deg ${pNew}deg, 
+          #f97316 ${pNew}deg ${pNew + pLearning}deg,
+          #86efac ${pNew + pLearning}deg ${pNew + pLearning + pYoung}deg,
+          #22c55e ${pNew + pLearning + pYoung}deg 360deg
+      )`;
+
+      return (
+          <div className="flex items-center gap-6">
+               <div className="relative w-32 h-32 rounded-full" style={{ background: gradient }}>
+                   <div className="absolute inset-8 bg-white rounded-full flex items-center justify-center">
+                       <div className="text-center">
+                           <div className="text-xs text-slate-400 font-bold">Total</div>
+                           <div className="text-xl font-bold text-slate-800">{counts.total}</div>
+                       </div>
+                   </div>
+               </div>
+               <div className="space-y-1 text-xs font-medium">
+                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-sm"></div> New: {counts.new}</div>
+                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-orange-500 rounded-sm"></div> Learning: {counts.learning}</div>
+                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-300 rounded-sm"></div> Young: {counts.young}</div>
+                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500 rounded-sm"></div> Mature: {counts.mature}</div>
+               </div>
+          </div>
+      )
+  };
+
+  // --- MAIN RENDER ---
+
   if (view === 'overview') {
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
-             <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl p-6 md:p-8 animate-in zoom-in duration-300 overflow-y-auto max-h-[95vh]">
-                 <div className="flex justify-between items-center mb-6">
-                     <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                        <span className="text-3xl">📊</span> Thống kê học tập
-                     </h2>
-                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-2 text-xl">✕</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 p-4 overflow-y-auto">
+             <div className="w-full max-w-6xl mx-auto space-y-6 pb-10">
+                 
+                 {/* Header & Back */}
+                 <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                     <h2 className="text-xl font-bold text-slate-800">Thống kê & Ôn tập</h2>
+                     <button onClick={onClose} className="text-slate-500 hover:text-slate-800 font-bold px-4">Đóng</button>
                  </div>
 
                  {stats ? (
-                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                          
-                         {/* LEFT COLUMN: Daily Status & Big Stats */}
-                         <div className="space-y-6">
-                             {/* Daily Limit */}
-                             <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
-                                <div className="flex justify-between items-center mb-4">
-                                     <h3 className="text-xs font-bold text-slate-500 uppercase">Hôm nay</h3>
-                                     {isEditingLimit ? (
-                                         <div className="flex items-center gap-2">
-                                            <input 
-                                                type="number" 
-                                                value={tempLimit} 
-                                                onChange={(e)=>setTempLimit(e.target.value)} 
-                                                className="w-14 px-1 py-0.5 text-sm border rounded"
-                                            />
-                                            <button onClick={handleSaveLimit} className="text-green-600 text-xs font-bold">Lưu</button>
-                                         </div>
-                                     ) : (
-                                         <button onClick={() => setIsEditingLimit(true)} className="text-slate-400 text-[10px] hover:text-indigo-500 hover:underline">
-                                             Giới hạn: {stats.dailyLimit} 🖊️
-                                         </button>
-                                     )}
-                                </div>
-                                
-                                <div className="text-4xl font-black text-slate-800 mb-2">
-                                    {stats.studiedToday} <span className="text-sm font-medium text-slate-400">/ {stats.dailyLimit}</span>
-                                </div>
-                                <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden mb-4">
-                                    <div 
-                                        className={`h-full rounded-full transition-all ${stats.studiedToday >= stats.dailyLimit ? 'bg-green-500' : 'bg-indigo-500'}`}
-                                        style={{ width: `${Math.min(100, (stats.studiedToday / stats.dailyLimit) * 100)}%` }}
-                                    ></div>
-                                </div>
-
-                                {stats.backlog > 0 && (
-                                    <div className="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-xs font-bold border border-red-100 flex items-center gap-2">
-                                        <span>⚠️</span> Nợ bài: {stats.backlog} thẻ
-                                    </div>
-                                )}
-                             </div>
-
-                             {/* Start Button */}
-                             <button 
-                                onClick={() => setView(queue.length > 0 ? 'review' : 'overview')}
-                                disabled={queue.length === 0}
-                                className="w-full py-4 bg-slate-900 text-white font-bold text-lg rounded-xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2"
-                             >
-                                {stats.studiedToday >= stats.dailyLimit && queue.length > 0 ? (
-                                    <><span>💪</span> Học vượt chỉ tiêu ({queue.length})</>
-                                ) : (
-                                    queue.length > 0 ? `Bắt đầu ôn tập (${queue.length})` : 'Đã hoàn thành!'
-                                )}
-                             </button>
-
-                             {/* Small Stats Grid */}
-                             <div className="grid grid-cols-2 gap-3">
-                                 <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                                     <div className="text-2xl font-black text-emerald-600">{stats.mastered}</div>
-                                     <div className="text-[10px] font-bold text-emerald-800 uppercase">Thuộc lòng</div>
-                                 </div>
-                                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                                     <div className="text-2xl font-black text-blue-600">{stats.learning}</div>
-                                     <div className="text-[10px] font-bold text-blue-800 uppercase">Đang học</div>
-                                 </div>
-                             </div>
-                         </div>
-
-                         {/* RIGHT COLUMN: Chart (Spanning 2 cols) */}
-                         <div className="md:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col">
-                            <div className="flex justify-between items-center mb-6">
-                                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Lịch sử ôn tập</h3>
-                                <div className="flex bg-slate-100 p-1 rounded-lg">
-                                    {(['week', 'month', 'year'] as const).map(r => (
+                         {/* CARD: HÔM NAY */}
+                         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
+                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Hôm nay</h3>
+                             <div className="flex-1 flex flex-col justify-center items-center text-center space-y-4">
+                                 {queue.length > 0 ? (
+                                     <>
+                                        <p className="text-slate-500 text-sm">Bạn có <strong className="text-slate-900">{queue.length}</strong> thẻ cần ôn tập ngay.</p>
                                         <button 
-                                            key={r}
-                                            onClick={() => setChartRange(r)}
-                                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${chartRange === r ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                                            onClick={() => setView('review')}
+                                            className="px-8 py-3 bg-blue-600 text-white font-bold rounded shadow hover:bg-blue-700 transition-all"
                                         >
-                                            {r === 'week' ? 'Tuần' : r === 'month' ? 'Tháng' : 'Năm'}
+                                            Bắt đầu học ngay
                                         </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* ANKI STYLE CHART */}
-                            <div className="flex-1 min-h-[200px] flex items-end gap-2 sm:gap-4 pb-2 border-b border-slate-200 relative">
-                                {/* Grid lines background */}
-                                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-10">
-                                    <div className="w-full border-t border-slate-900"></div>
-                                    <div className="w-full border-t border-slate-900"></div>
-                                    <div className="w-full border-t border-slate-900"></div>
-                                    <div className="w-full border-t border-slate-900"></div>
-                                </div>
-
-                                {chartData.length > 0 ? chartData.map((data, idx) => {
-                                    // Scale based on max total
-                                    const maxVal = Math.max(...chartData.map(d => d.total), 5);
-                                    const heightPercent = (data.total / maxVal) * 100;
-
-                                    // Segments height calculation
-                                    const hAgain = (data.again / data.total) * 100;
-                                    const hHard = (data.hard / data.total) * 100;
-                                    const hGood = (data.good / data.total) * 100;
-                                    const hEasy = (data.easy / data.total) * 100;
-
-                                    return (
-                                        <div key={idx} className="flex-1 flex flex-col items-center group relative min-w-[15px]">
-                                            {/* Tooltip */}
-                                            <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-[10px] p-2 rounded pointer-events-none z-10 w-max shadow-lg">
-                                                <div className="font-bold mb-1 border-b border-slate-600 pb-1">{data.label}</div>
-                                                <div className="text-sky-300">Easy: {data.easy}</div>
-                                                <div className="text-emerald-300">Good: {data.good}</div>
-                                                <div className="text-orange-300">Hard: {data.hard}</div>
-                                                <div className="text-rose-300">Again: {data.again}</div>
-                                                <div className="mt-1 pt-1 border-t border-slate-600 font-bold">Total: {data.total}</div>
-                                            </div>
-
-                                            {/* Stacked Bar */}
-                                            <div 
-                                                className="w-full max-w-[30px] rounded-t-sm overflow-hidden flex flex-col-reverse relative bg-slate-100 hover:brightness-90 transition-all cursor-crosshair"
-                                                style={{ height: `${Math.max(2, heightPercent)}%` }}
-                                            >
-                                                {/* Easy (Blue) */}
-                                                {data.easy > 0 && <div style={{ height: `${hEasy}%` }} className="bg-sky-500 w-full"></div>}
-                                                {/* Good (Green) */}
-                                                {data.good > 0 && <div style={{ height: `${hGood}%` }} className="bg-emerald-500 w-full"></div>}
-                                                {/* Hard (Orange) */}
-                                                {data.hard > 0 && <div style={{ height: `${hHard}%` }} className="bg-orange-400 w-full"></div>}
-                                                {/* Again (Red) */}
-                                                {data.again > 0 && <div style={{ height: `${hAgain}%` }} className="bg-rose-500 w-full"></div>}
-                                            </div>
-                                            
-                                            {/* Label */}
-                                            {(chartRange === 'week' || chartRange === 'year' || idx % 5 === 0) && (
-                                                <span className="text-[10px] text-slate-400 font-bold mt-2 rotate-0 truncate w-full text-center">{data.label}</span>
-                                            )}
-                                        </div>
-                                    );
-                                }) : (
-                                    <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Chưa có dữ liệu học tập</div>
-                                )}
-                            </div>
-                            
-                            {/* Legend */}
-                            <div className="flex gap-4 justify-center mt-4">
-                                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-500 rounded-sm"></div><span className="text-[10px] font-bold text-slate-500">Again</span></div>
-                                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-orange-400 rounded-sm"></div><span className="text-[10px] font-bold text-slate-500">Hard</span></div>
-                                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-sm"></div><span className="text-[10px] font-bold text-slate-500">Good</span></div>
-                                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-sky-500 rounded-sm"></div><span className="text-[10px] font-bold text-slate-500">Easy</span></div>
-                            </div>
+                                     </>
+                                 ) : (
+                                     <p className="text-slate-400">Không có thẻ nào cần học hôm nay.</p>
+                                 )}
+                                 
+                                 <div className="mt-4 pt-4 border-t w-full text-xs text-slate-500 flex justify-between">
+                                     <span>Đã học: {stats.today.studied} thẻ</span>
+                                     <span>Học lại: {stats.today.againCount}</span>
+                                     <span>Thuộc: {stats.today.matureCount}</span>
+                                 </div>
+                             </div>
                          </div>
+
+                         {/* CARD: DỰ BÁO */}
+                         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
+                             <div className="flex justify-between items-center mb-4 border-b pb-2">
+                                <h3 className="text-lg font-semibold text-slate-800">Dự báo</h3>
+                                <div className="space-x-2 text-[10px]">
+                                    <label><input type="radio" checked={forecastRange==='1m'} onChange={()=>setForecastRange('1m')} /> 1 tháng</label>
+                                    <label><input type="radio" checked={forecastRange==='3m'} onChange={()=>setForecastRange('3m')} /> 3 tháng</label>
+                                </div>
+                             </div>
+                             <div className="flex-1">
+                                 <div className="text-center text-xs text-slate-500 mb-2">Số thẻ ôn tập đến hạn trong tương lai.</div>
+                                 <SimpleBarChart 
+                                    data={forecastRange === '1m' ? stats.forecast.data.slice(0, 30) : stats.forecast.data} 
+                                    labels={forecastRange === '1m' ? stats.forecast.labels.slice(0, 30) : stats.forecast.labels} 
+                                    color="bg-slate-300"
+                                 />
+                             </div>
+                         </div>
+
+                         {/* CARD: SỐ LƯỢNG THẺ */}
+                         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
+                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Số lượng thẻ</h3>
+                             <div className="flex-1 flex justify-center items-center">
+                                 <DonutChart counts={stats.counts} />
+                             </div>
+                         </div>
+
+                         {/* CARD: KHOẢNG CÁCH */}
+                         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
+                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Khoảng cách</h3>
+                             <div className="flex-1">
+                                 <div className="text-center text-xs text-slate-500 mb-2">Thời gian giãn cách đến khi hiện thẻ ôn tập lần nữa</div>
+                                 <SimpleBarChart 
+                                    data={stats.intervals.data} 
+                                    labels={stats.intervals.labels}
+                                    color="bg-slate-400"
+                                 />
+                             </div>
+                         </div>
+
+                         {/* CARD: SETTINGS */}
+                         <div className="md:col-span-2 bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-between items-center">
+                             <span className="text-sm font-bold text-slate-600">Giới hạn học mỗi ngày</span>
+                             <div className="flex items-center gap-2">
+                                 {isEditingLimit ? (
+                                     <>
+                                        <input 
+                                            type="number" 
+                                            value={tempLimit} 
+                                            onChange={(e) => setTempLimit(e.target.value)}
+                                            className="w-20 px-2 py-1 border rounded"
+                                        />
+                                        <button onClick={handleSaveLimit} className="text-green-600 font-bold text-sm">Lưu</button>
+                                     </>
+                                 ) : (
+                                     <button onClick={() => setIsEditingLimit(true)} className="text-indigo-600 font-bold hover:underline">
+                                         {stats.today.limit} thẻ / ngày ✏️
+                                     </button>
+                                 )}
+                             </div>
+                         </div>
+
                      </div>
                  ) : (
-                     <div className="text-center py-10">Đang tải thống kê...</div>
+                     <div className="text-center py-20 text-slate-400">Đang tính toán dữ liệu...</div>
                  )}
              </div>
         </div>
@@ -303,89 +298,81 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   const currentCard = queue[currentIndex];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900 bg-opacity-95 p-4">
-      <div className="w-full max-w-2xl h-[85vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 p-4">
+      <div className="w-full max-w-2xl h-[90vh] flex flex-col bg-white rounded-2xl shadow-xl overflow-hidden">
         
         {/* Top Bar */}
-        <div className="flex justify-between items-center text-white/80 mb-4 px-2">
+        <div className="flex justify-between items-center bg-slate-50 p-4 border-b border-slate-200">
             <div className="flex flex-col">
-                <span className="text-xs font-bold uppercase tracking-widest opacity-60">Flashcards</span>
-                <span className="font-mono text-sm">{currentIndex + 1} / {queue.length}</span>
+                <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Flashcards</span>
+                <span className="font-mono text-sm text-slate-700 font-bold">{currentIndex + 1} / {queue.length}</span>
             </div>
-            <button onClick={onClose} className="hover:text-white hover:bg-white/10 p-2 rounded-full transition-all">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
+            <button onClick={onClose} className="text-slate-400 hover:text-red-500 p-2">✕</button>
         </div>
 
         {/* Card Area */}
-        <div className="flex-1 perspective-1000 relative mb-6">
-             <div 
-                className={`w-full h-full relative transition-all duration-500 transform-style-3d cursor-pointer ${isFlipped ? 'rotate-y-180' : ''}`}
-                onClick={() => setIsFlipped(!isFlipped)}
-              >
-                {/* FRONT */}
-                <div className="absolute inset-0 backface-hidden bg-white rounded-3xl shadow-2xl flex flex-col items-center justify-center p-8 text-center border-b-8 border-slate-200">
-                    <span className="text-sm font-bold text-slate-300 uppercase tracking-widest mb-8">Từ vựng</span>
-                    <h2 className="text-5xl md:text-6xl font-serif font-bold text-slate-900 mb-4 tracking-tight">{currentCard.term}</h2>
-                    <span className="text-slate-400 font-mono text-xl">/{currentCard.phonetic}/</span>
-                    
-                    <button 
+        <div className="flex-1 relative overflow-y-auto p-8 flex flex-col items-center justify-center text-center cursor-pointer" onClick={() => setIsFlipped(!isFlipped)}>
+            
+            <div className="mb-8">
+                 <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-2">Từ vựng</span>
+                 <h2 className="text-4xl md:text-5xl font-serif font-bold text-slate-900 mb-2">{currentCard.term}</h2>
+                 <span className="text-slate-500 font-mono text-lg">/{currentCard.phonetic}/</span>
+                 <button 
                         onClick={(e) => { e.stopPropagation(); playAudio(currentCard.term); }}
-                        className="mt-8 p-4 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 hover:scale-110 transition-all shadow-sm"
+                        className="ml-2 text-indigo-500 hover:text-indigo-700 p-1 align-middle"
                     >
-                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
-                    </button>
-                    
-                    <p className="absolute bottom-6 text-sm text-slate-300 font-medium">Chạm để xem nghĩa</p>
-                </div>
-
-                {/* BACK */}
-                <div className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-50 rounded-3xl shadow-2xl flex flex-col items-center justify-center p-8 text-center border-b-8 border-slate-200">
-                    <div className="w-full max-w-md">
-                        <span className="text-sm font-bold text-indigo-400 uppercase tracking-widest mb-4 block">Định nghĩa</span>
-                        <p className="text-3xl font-bold text-slate-800 mb-6 leading-relaxed">{currentCard.meaning}</p>
-                        
-                        <div className="w-full h-px bg-slate-200 my-6"></div>
-                        
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Ngữ cảnh</span>
-                        <p className="text-slate-600 text-lg leading-relaxed italic">
-                            "{currentCard.explanation}"
-                        </p>
-                    </div>
-                </div>
+                        🔊
+                </button>
             </div>
+
+            {isFlipped ? (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-lg border-t pt-8 border-slate-100">
+                     <div className="mb-6">
+                        <span className="text-xs font-bold text-green-600 uppercase tracking-widest block mb-1">Nghĩa</span>
+                        <p className="text-2xl font-bold text-slate-800">{currentCard.meaning}</p>
+                     </div>
+                     
+                     <div className="bg-slate-50 p-4 rounded-xl text-left border border-slate-100">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Ngữ cảnh</span>
+                        <p className="text-slate-600 italic">"{currentCard.explanation}"</p>
+                     </div>
+                </div>
+            ) : (
+                <div className="mt-8 text-slate-300 text-sm font-medium animate-pulse">
+                    (Chạm để xem đáp án)
+                </div>
+            )}
         </div>
 
         {/* Action Buttons */}
-        <div className={`grid grid-cols-4 gap-3 transition-all duration-300 ${isFlipped ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
-            <button onClick={() => handleRate('again')} className="bg-red-100 hover:bg-red-200 text-red-700 py-3 px-1 rounded-xl flex flex-col items-center border-b-4 border-red-200 active:border-b-0 active:translate-y-1 transition-all">
-                <span className="text-xs font-bold mb-1">{getIntervalPreview('again')}</span>
-                <span className="font-bold text-lg">Again</span>
-            </button>
-            <button onClick={() => handleRate('hard')} className="bg-orange-100 hover:bg-orange-200 text-orange-700 py-3 px-1 rounded-xl flex flex-col items-center border-b-4 border-orange-200 active:border-b-0 active:translate-y-1 transition-all">
-                <span className="text-xs font-bold mb-1">{getIntervalPreview('hard')}</span>
-                <span className="font-bold text-lg">Hard</span>
-            </button>
-            <button onClick={() => handleRate('good')} className="bg-green-100 hover:bg-green-200 text-green-700 py-3 px-1 rounded-xl flex flex-col items-center border-b-4 border-green-200 active:border-b-0 active:translate-y-1 transition-all">
-                <span className="text-xs font-bold mb-1">{getIntervalPreview('good')}</span>
-                <span className="font-bold text-lg">Good</span>
-            </button>
-            <button onClick={() => handleRate('easy')} className="bg-sky-100 hover:bg-sky-200 text-sky-700 py-3 px-1 rounded-xl flex flex-col items-center border-b-4 border-sky-200 active:border-b-0 active:translate-y-1 transition-all">
-                <span className="text-xs font-bold mb-1">{getIntervalPreview('easy')}</span>
-                <span className="font-bold text-lg">Easy</span>
-            </button>
+        <div className="p-4 bg-slate-50 border-t border-slate-200">
+            {isFlipped ? (
+                <div className="grid grid-cols-4 gap-2">
+                    <button onClick={() => handleRate('again')} className="bg-rose-100 hover:bg-rose-200 text-rose-700 py-3 rounded-lg flex flex-col items-center border border-rose-200">
+                        <span className="text-[10px] font-bold mb-1 opacity-70">{getIntervalPreview('again')}</span>
+                        <span className="font-bold">Again</span>
+                    </button>
+                    <button onClick={() => handleRate('hard')} className="bg-orange-100 hover:bg-orange-200 text-orange-700 py-3 rounded-lg flex flex-col items-center border border-orange-200">
+                        <span className="text-[10px] font-bold mb-1 opacity-70">{getIntervalPreview('hard')}</span>
+                        <span className="font-bold">Hard</span>
+                    </button>
+                    <button onClick={() => handleRate('good')} className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 py-3 rounded-lg flex flex-col items-center border border-emerald-200">
+                        <span className="text-[10px] font-bold mb-1 opacity-70">{getIntervalPreview('good')}</span>
+                        <span className="font-bold">Good</span>
+                    </button>
+                    <button onClick={() => handleRate('easy')} className="bg-sky-100 hover:bg-sky-200 text-sky-700 py-3 rounded-lg flex flex-col items-center border border-sky-200">
+                        <span className="text-[10px] font-bold mb-1 opacity-70">{getIntervalPreview('easy')}</span>
+                        <span className="font-bold">Easy</span>
+                    </button>
+                </div>
+            ) : (
+                <button onClick={() => setIsFlipped(true)} className="w-full py-4 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800">
+                    Hiện đáp án
+                </button>
+            )}
         </div>
-        
-        {/* Spacer for non-flipped state */}
-        {!isFlipped && <div className="h-[84px] flex items-center justify-center text-white/30 text-sm animate-pulse">Đang chờ lật thẻ...</div>}
 
       </div>
-      <style>{`
-        .perspective-1000 { perspective: 1000px; }
-        .transform-style-3d { transform-style: preserve-3d; }
-        .backface-hidden { backface-visibility: hidden; }
-        .rotate-y-180 { transform: rotateY(180deg); }
-      `}</style>
     </div>
   );
 };

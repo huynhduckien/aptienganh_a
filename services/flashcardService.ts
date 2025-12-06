@@ -1,6 +1,6 @@
 
 
-import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint } from "../types";
+import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint, AnkiStats } from "../types";
 import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB } from "./db";
 import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey } from "./firebaseService";
 
@@ -155,13 +155,11 @@ export const getFlashcardStats = async (): Promise<FlashcardStats> => {
     // Remaining quota for today
     const remainingQuota = Math.max(0, limit - studiedToday);
     
-    // Backlog: Số lượng thẻ Due thực tế - Số lượng thẻ được phép học hôm nay
-    // Nếu Backlog > 0 nghĩa là kể cả học hết hôm nay vẫn còn nợ sang hôm sau
     const backlog = Math.max(0, allDue.length - remainingQuota);
 
     return {
         total: cards.length,
-        due: allDue.length, // Total real due
+        due: allDue.length, 
         new: cards.filter(c => c.repetitions === 0).length,
         learning: cards.filter(c => c.repetitions > 0 && c.interval < 21).length, 
         review: cards.filter(c => c.interval >= 21).length,
@@ -173,68 +171,88 @@ export const getFlashcardStats = async (): Promise<FlashcardStats> => {
     };
 };
 
-export const getStudyHistoryChart = async (range: 'week' | 'month' | 'year'): Promise<ChartDataPoint[]> => {
+// --- ANKI STATS GENERATOR ---
+export const getAnkiStats = async (): Promise<AnkiStats> => {
+    const cards = await getFlashcards();
     const logs = await getReviewLogsFromDB();
-    const data: ChartDataPoint[] = [];
+    const now = Date.now();
     
-    if (range === 'year') {
-        // 12 months
-        for (let i = 11; i >= 0; i--) {
-            const d = new Date();
-            d.setMonth(d.getMonth() - i);
-            d.setDate(1);
-            d.setHours(0,0,0,0);
-            
-            const monthStart = d.getTime();
-            
-            // End of month
-            const nextMonth = new Date(d);
-            nextMonth.setMonth(nextMonth.getMonth() + 1);
-            const monthEnd = nextMonth.getTime();
+    // 1. TODAY
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const todayTs = startOfDay.getTime();
+    const todayLogs = logs.filter(l => l.timestamp >= todayTs);
+    
+    const todayStats = {
+        studied: todayLogs.length,
+        limit: getDailyLimit(),
+        againCount: todayLogs.filter(l => l.rating === 'again').length,
+        matureCount: todayLogs.filter(l => l.rating !== 'again').length
+    };
 
-            // Filter logs for this month
-            const monthLogs = logs.filter(l => l.timestamp >= monthStart && l.timestamp < monthEnd);
-            
-            data.push({
-                label: d.toLocaleDateString('vi-VN', { month: 'short' }),
-                total: monthLogs.length,
-                again: monthLogs.filter(l => l.rating === 'again').length,
-                hard: monthLogs.filter(l => l.rating === 'hard').length,
-                good: monthLogs.filter(l => l.rating === 'good').length,
-                easy: monthLogs.filter(l => l.rating === 'easy').length,
-            });
+    // 2. COUNTS (Pie Chart)
+    // Classification: New (0 reps), Young (< 21d interval), Mature (>= 21d interval)
+    // We can also split Young into "Learning" (reps > 0 but low)
+    const counts = {
+        new: 0,
+        learning: 0,
+        young: 0,
+        mature: 0,
+        suspended: 0,
+        total: cards.length
+    };
+
+    cards.forEach(c => {
+        if (c.repetitions === 0) {
+            counts.new++;
+        } else if (c.interval < 1) {
+            counts.learning++;
+        } else if (c.interval < 21) {
+            counts.young++;
+        } else {
+            counts.mature++;
         }
-    } else {
-        // Week (7 days) or Month (30 days)
-        const days = range === 'month' ? 30 : 7;
-        
-        for (let i = days - 1; i >= 0; i--) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            d.setHours(0,0,0,0);
-            
-            const dayStart = d.getTime();
-            const dayEnd = dayStart + ONE_DAY;
-            
-            const dayLogs = logs.filter(l => l.timestamp >= dayStart && l.timestamp < dayEnd);
-            
-            // Format: Mon (Week) or 01 (Month)
-            const options: Intl.DateTimeFormatOptions = range === 'month' 
-                ? { day: 'numeric' }
-                : { weekday: 'short' };
-                
-            data.push({
-                label: d.toLocaleDateString('vi-VN', options),
-                total: dayLogs.length,
-                again: dayLogs.filter(l => l.rating === 'again').length,
-                hard: dayLogs.filter(l => l.rating === 'hard').length,
-                good: dayLogs.filter(l => l.rating === 'good').length,
-                easy: dayLogs.filter(l => l.rating === 'easy').length,
-            });
-        }
-    }
+    });
+
+    // 3. FORECAST (Future Due Dates) - 30 days
+    const forecastMap = new Array(31).fill(0);
+    const forecastLabels = new Array(31).fill('').map((_, i) => i === 0 ? 'Today' : `+${i}d`);
     
-    return data;
+    cards.forEach(c => {
+        if (c.nextReview > now) {
+            const diffTime = Math.abs(c.nextReview - now);
+            const diffDays = Math.ceil(diffTime / ONE_DAY);
+            if (diffDays <= 30) {
+                forecastMap[diffDays]++;
+            }
+        } else {
+             // Overdue counts as today/tomorrow load essentially
+             forecastMap[0]++;
+        }
+    });
+
+    // 4. INTERVALS (Distribution)
+    // Buckets: 0-1d, 2-7d, 8-30d, 1-3m, 3-6m, 6m-1y, 1y+
+    const intervalBuckets = [0, 0, 0, 0, 0, 0, 0];
+    const intervalLabels = ['0-1d', '2-7d', '8-30d', '1-3m', '3-6m', '6m-1y', '>1y'];
+    
+    cards.forEach(c => {
+        const days = c.interval;
+        if (days <= 1) intervalBuckets[0]++;
+        else if (days <= 7) intervalBuckets[1]++;
+        else if (days <= 30) intervalBuckets[2]++;
+        else if (days <= 90) intervalBuckets[3]++;
+        else if (days <= 180) intervalBuckets[4]++;
+        else if (days <= 365) intervalBuckets[5]++;
+        else intervalBuckets[6]++;
+    });
+
+    return {
+        today: todayStats,
+        counts,
+        forecast: { data: forecastMap, labels: forecastLabels },
+        intervals: { data: intervalBuckets, labels: intervalLabels }
+    };
 };
 
 // --- SM-2 ALGORITHM ---
