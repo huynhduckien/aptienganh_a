@@ -1,7 +1,7 @@
 
 import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint, AnkiStats } from "../types";
 import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB } from "./db";
-import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey } from "./firebaseService";
+import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey, fetchCloudReviewLogs, saveCloudReviewLog } from "./firebaseService";
 
 let hasSynced = false;
 
@@ -38,7 +38,23 @@ export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     await clearAllFlashcardsFromDB();
     
     hasSynced = false;
-    await getFlashcards(); // Tự động tải từ Cloud về sau khi đã dọn sạch
+
+    // 1. Tải Flashcards
+    // (Logic getFlashcards sẽ tự gọi fetchCloudFlashcards vì hasSynced = false)
+    await getFlashcards(); 
+
+    // 2. Tải Review Logs (Lịch sử học) để vẽ biểu đồ
+    try {
+        const cloudLogs = await fetchCloudReviewLogs();
+        if (cloudLogs && cloudLogs.length > 0) {
+            // Lưu logs vào DB local để các hàm thống kê hoạt động
+            for (const log of cloudLogs) {
+                await saveReviewLogToDB(log);
+            }
+        }
+    } catch (e) {
+        console.warn("Failed to sync review logs", e);
+    }
 };
 
 export const getFlashcards = async (): Promise<Flashcard[]> => {
@@ -536,10 +552,13 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
   await saveFlashcardToDB(updatedCard);
   saveCloudFlashcard(updatedCard);
   
-  await saveReviewLogToDB({
+  const log: ReviewLog = {
       id: generateId(),
       cardId,
       rating,
       timestamp: Date.now()
-  });
+  };
+
+  await saveReviewLogToDB(log);
+  saveCloudReviewLog(log);
 };

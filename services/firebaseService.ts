@@ -1,5 +1,5 @@
 
-import { Flashcard, StudentAccount } from "../types";
+import { Flashcard, StudentAccount, ReviewLog } from "../types";
 import { DictionaryResponse } from "./geminiService";
 
 // URL Firebase chính thức của bạn
@@ -39,6 +39,37 @@ export const saveCloudFlashcard = async (card: Flashcard): Promise<void> => {
     });
   } catch (error) {
     console.warn("Cloud flashcard save failed", error);
+  }
+};
+
+// --- REVIEW LOGS (User Specific - NEW for Statistics) ---
+
+export const fetchCloudReviewLogs = async (): Promise<ReviewLog[]> => {
+  if (!currentSyncKey) return [];
+  try {
+    const response = await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/logs.json`);
+    if (!response.ok) return [];
+    
+    const data = await response.json();
+    if (!data) return [];
+
+    return Object.values(data);
+  } catch (error) {
+    console.warn("Cloud logs fetch failed", error);
+    return [];
+  }
+};
+
+export const saveCloudReviewLog = async (log: ReviewLog): Promise<void> => {
+  if (!currentSyncKey) return;
+  try {
+    await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/logs/${log.id}.json`, {
+      method: 'PUT',
+      body: JSON.stringify(log),
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    console.warn("Cloud log save failed", error);
   }
 };
 
