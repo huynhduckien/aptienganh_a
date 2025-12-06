@@ -1,6 +1,7 @@
 
-import { Flashcard, ReviewRating } from "../types";
-import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB } from "./db";
+
+import { Flashcard, ReviewRating, ReviewLog } from "../types";
+import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB } from "./db";
 import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey } from "./firebaseService";
 
 let hasSynced = false;
@@ -9,6 +10,9 @@ let hasSynced = false;
 const ONE_MINUTE = 60 * 1000;
 const ONE_DAY = 24 * 60 * 60 * 1000;
 
+// Config limit
+const DAILY_LIMIT = 50; 
+
 export interface FlashcardStats {
     total: number;
     due: number;
@@ -16,13 +20,22 @@ export interface FlashcardStats {
     learning: number;
     review: number;
     mastered: number;
+    
+    // Daily Limit Info
+    studiedToday: number;
+    dailyLimit: number;
+    backlog: number; // Nợ bài
+}
+
+export interface ChartData {
+    labels: string[];
+    values: number[];
 }
 
 export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     setFirebaseSyncKey(key);
     
     // QUAN TRỌNG: Khi đăng nhập tài khoản mới, xóa sạch dữ liệu cũ trên máy
-    // để tránh việc dữ liệu của Admin/Guest bị trộn vào tài khoản học viên.
     await clearAllFlashcardsFromDB();
     
     hasSynced = false;
@@ -40,8 +53,6 @@ export const getFlashcards = async (): Promise<Flashcard[]> => {
        if (cloudCards.length > 0) {
            const mergedMap = new Map<string, Flashcard>();
            
-           // Vì ta đã clear DB khi login, nên localCards lúc này thường là rỗng (trừ khi user tự học offline trước đó)
-           // Tuy nhiên vẫn giữ logic merge để an toàn cho trường hợp mất mạng rồi có mạng lại
            localCards.forEach(c => mergedMap.set(c.id, c));
            
            for (const cloudCard of cloudCards) {
@@ -51,7 +62,6 @@ export const getFlashcards = async (): Promise<Flashcard[]> => {
                    mergedMap.set(cloudCard.id, cloudCard);
                    await saveFlashcardToDB(cloudCard);
                } else {
-                   // Logic merge: lấy cái nào có tiến độ xa hơn
                    const localProgress = (localCard.repetitions || 0) + (localCard.interval || 0);
                    const cloudProgress = (cloudCard.repetitions || 0) + (cloudCard.interval || 0);
                    
@@ -100,24 +110,80 @@ export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'next
   return true;
 };
 
+// Logic: Chỉ lấy thẻ Due, nhưng lọc theo Daily Limit
 export const getDueFlashcards = async (): Promise<Flashcard[]> => {
   const cards = await getFlashcards();
   const now = Date.now();
-  return cards.filter(card => card.nextReview <= now).sort((a,b) => a.nextReview - b.nextReview);
+  
+  // Lấy tất cả thẻ đến hạn
+  const allDue = cards.filter(card => card.nextReview <= now).sort((a,b) => a.nextReview - b.nextReview);
+  
+  // Kiểm tra limit hôm nay
+  const studiedToday = await getStudiedCountToday();
+  const remainingQuota = Math.max(0, DAILY_LIMIT - studiedToday);
+  
+  // Trả về số thẻ tối đa cho phép
+  return allDue.slice(0, remainingQuota);
+};
+
+// Đếm số thẻ đã học hôm nay
+const getStudiedCountToday = async (): Promise<number> => {
+    const logs = await getReviewLogsFromDB();
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const todayTs = startOfDay.getTime();
+    
+    return logs.filter(l => l.timestamp >= todayTs).length;
 };
 
 export const getFlashcardStats = async (): Promise<FlashcardStats> => {
     const cards = await getFlashcards();
     const now = Date.now();
     
+    const allDue = cards.filter(c => c.nextReview <= now);
+    const studiedToday = await getStudiedCountToday();
+    
+    // Backlog là tổng số nợ - số lượng cho phép hôm nay (nếu nợ quá nhiều)
+    // Hoặc đơn giản là tổng số Due
+    const backlog = Math.max(0, allDue.length - (DAILY_LIMIT - studiedToday));
+
     return {
         total: cards.length,
-        due: cards.filter(c => c.nextReview <= now).length,
+        due: allDue.length,
         new: cards.filter(c => c.repetitions === 0).length,
         learning: cards.filter(c => c.repetitions > 0 && c.interval < 21).length, 
         review: cards.filter(c => c.interval >= 21).length,
-        mastered: cards.filter(c => c.interval > 90).length 
+        mastered: cards.filter(c => c.interval > 90).length,
+        
+        studiedToday,
+        dailyLimit: DAILY_LIMIT,
+        backlog
     };
+};
+
+export const getStudyHistoryChart = async (): Promise<ChartData> => {
+    const logs = await getReviewLogsFromDB();
+    const labels: string[] = [];
+    const values: number[] = [];
+    
+    // Lấy 7 ngày gần nhất
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        d.setHours(0,0,0,0);
+        
+        const dayStart = d.getTime();
+        const dayEnd = dayStart + ONE_DAY;
+        
+        const count = logs.filter(l => l.timestamp >= dayStart && l.timestamp < dayEnd).length;
+        
+        // Format: Mon, Tue or 12/05
+        const label = d.toLocaleDateString('vi-VN', { weekday: 'short' }); // T2, T3...
+        labels.push(label);
+        values.push(count);
+    }
+    
+    return { labels, values };
 };
 
 // --- SM-2 ALGORITHM ---
@@ -181,4 +247,12 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
   
   await saveFlashcardToDB(updatedCard);
   saveCloudFlashcard(updatedCard);
+  
+  // GHI LOG LỊCH SỬ
+  await saveReviewLogToDB({
+      id: generateId(),
+      cardId,
+      rating,
+      timestamp: Date.now()
+  });
 };

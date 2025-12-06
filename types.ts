@@ -1,4 +1,5 @@
 
+
 export interface KeyTerm {
   term: string;
   meaning: string;
@@ -46,6 +47,13 @@ export interface Flashcard {
   easeFactor: number; // Default 2.5
   interval: number; // Days
   repetitions: number; // Consecutive correct reviews
+}
+
+export interface ReviewLog {
+    id: string;
+    cardId: string;
+    rating: ReviewRating;
+    timestamp: number;
 }
 
 export interface StudentAccount {

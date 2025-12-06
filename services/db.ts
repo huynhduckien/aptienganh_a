@@ -1,10 +1,12 @@
 
-import { ProcessedChunk, SavedPaper, Flashcard } from "../types";
+
+import { ProcessedChunk, SavedPaper, Flashcard, ReviewLog } from "../types";
 
 const DB_NAME = 'PaperLingoDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3; // Upgraded version for logs
 const STORE_PAPERS = 'papers';
 const STORE_FLASHCARDS = 'flashcards';
+const STORE_LOGS = 'review_logs';
 
 // Hàm tạo ID an toàn
 export const generateId = (): string => {
@@ -22,6 +24,10 @@ const openDB = (): Promise<IDBDatabase> => {
       }
       if (!db.objectStoreNames.contains(STORE_FLASHCARDS)) {
         db.createObjectStore(STORE_FLASHCARDS, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORE_LOGS)) {
+        const logStore = db.createObjectStore(STORE_LOGS, { keyPath: 'id' });
+        logStore.createIndex('timestamp', 'timestamp', { unique: false });
       }
     };
 
@@ -132,13 +138,38 @@ export const updateFlashcardInDB = async (card: Flashcard): Promise<void> => {
     return saveFlashcardToDB(card);
 };
 
+// --- REVIEW LOGS (NEW) ---
+
+export const saveReviewLogToDB = async (log: ReviewLog): Promise<void> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_LOGS], 'readwrite');
+        const store = tx.objectStore(STORE_LOGS);
+        store.add(log);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+};
+
+export const getReviewLogsFromDB = async (): Promise<ReviewLog[]> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_LOGS], 'readonly');
+        const store = tx.objectStore(STORE_LOGS);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+};
+
+
 // NEW: Hàm xóa sạch Flashcard để dùng khi switch tài khoản
 export const clearAllFlashcardsFromDB = async (): Promise<void> => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_FLASHCARDS], 'readwrite');
-        const store = tx.objectStore(STORE_FLASHCARDS);
-        const request = store.clear(); // Xóa sạch dữ liệu trong store
+        const tx = db.transaction([STORE_FLASHCARDS, STORE_LOGS], 'readwrite');
+        tx.objectStore(STORE_FLASHCARDS).clear();
+        tx.objectStore(STORE_LOGS).clear();
         
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);

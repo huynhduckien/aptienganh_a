@@ -1,7 +1,8 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { Flashcard, ReviewRating } from '../types';
-import { updateCardStatus, getFlashcardStats, FlashcardStats } from '../services/flashcardService';
+import { updateCardStatus, getFlashcardStats, FlashcardStats, getStudyHistoryChart, ChartData } from '../services/flashcardService';
 
 interface FlashcardReviewProps {
   cards: Flashcard[]; // These are the DUE cards
@@ -15,6 +16,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [stats, setStats] = useState<FlashcardStats | null>(null);
+  const [chartData, setChartData] = useState<ChartData | null>(null);
   
   // Session stats
   const [sessionCorrect, setSessionCorrect] = useState(0);
@@ -22,6 +24,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   useEffect(() => {
     // Refresh stats when component mounts
     getFlashcardStats().then(setStats);
+    getStudyHistoryChart().then(setChartData);
     setQueue(dueCards);
   }, [dueCards]);
 
@@ -83,39 +86,78 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   if (view === 'overview') {
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
-             <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-8 animate-in zoom-in duration-300">
-                 <div className="flex justify-between items-center mb-8">
+             <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl p-6 md:p-8 animate-in zoom-in duration-300 overflow-y-auto max-h-[90vh]">
+                 <div className="flex justify-between items-center mb-6">
                      <h2 className="text-2xl font-bold text-slate-800">Thống kê học tập</h2>
-                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-2 text-xl">✕</button>
                  </div>
 
                  {stats ? (
                      <div className="space-y-6">
-                         <div className="grid grid-cols-2 gap-4">
-                             <div className="bg-indigo-50 p-5 rounded-2xl border border-indigo-100 text-center">
-                                 <div className="text-3xl font-black text-indigo-600 mb-1">{stats.total}</div>
-                                 <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Tổng số từ</div>
+                         
+                         {/* Daily Limit Status */}
+                         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                             <div className="flex justify-between items-end mb-2">
+                                 <div>
+                                     <h3 className="text-sm font-bold text-slate-500 uppercase">Hôm nay</h3>
+                                     <div className="text-3xl font-black text-slate-800">
+                                         {stats.studiedToday} <span className="text-lg text-slate-400 font-medium">/ {stats.dailyLimit} thẻ</span>
+                                     </div>
+                                 </div>
+                                 <div className="text-right">
+                                     {stats.backlog > 0 && (
+                                         <div className="text-red-500 font-bold text-sm bg-red-50 px-3 py-1 rounded-full border border-red-100 mb-1">
+                                             ⚠️ Nợ bài: {stats.backlog} thẻ
+                                         </div>
+                                     )}
+                                 </div>
                              </div>
-                             <div className="bg-red-50 p-5 rounded-2xl border border-red-100 text-center relative overflow-hidden">
-                                 <div className="absolute top-0 right-0 p-1 bg-red-200 rounded-bl-xl text-[10px] font-bold text-red-700">Cần ôn ngay</div>
-                                 <div className="text-3xl font-black text-red-600 mb-1">{stats.due}</div>
-                                 <div className="text-xs font-bold text-red-400 uppercase tracking-wider">Đến hạn ôn</div>
+                             <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden">
+                                 <div 
+                                    className={`h-full rounded-full transition-all ${stats.studiedToday >= stats.dailyLimit ? 'bg-green-500' : 'bg-indigo-500'}`}
+                                    style={{ width: `${Math.min(100, (stats.studiedToday / stats.dailyLimit) * 100)}%` }}
+                                 ></div>
                              </div>
                          </div>
 
-                         <div className="space-y-3">
-                             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Trạng thái bộ nhớ</h3>
-                             <div className="flex h-4 rounded-full overflow-hidden w-full bg-slate-100">
-                                 <div className="bg-blue-400 h-full" style={{width: `${(stats.new / stats.total) * 100}%`}} title="Mới"></div>
-                                 <div className="bg-orange-400 h-full" style={{width: `${(stats.learning / stats.total) * 100}%`}} title="Đang học"></div>
-                                 <div className="bg-green-500 h-full" style={{width: `${(stats.review / stats.total) * 100}%`}} title="Ôn tập"></div>
-                                 <div className="bg-emerald-700 h-full" style={{width: `${(stats.mastered / stats.total) * 100}%`}} title="Thành thạo"></div>
+                         {/* Chart Section */}
+                         {chartData && (
+                            <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+                                <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Hoạt động 7 ngày qua</h3>
+                                <div className="flex items-end justify-between h-32 gap-2">
+                                    {chartData.values.map((val, idx) => {
+                                        const max = Math.max(...chartData.values, 10); // Scale
+                                        const height = (val / max) * 100;
+                                        return (
+                                            <div key={idx} className="flex-1 flex flex-col items-center group">
+                                                <div className="relative w-full flex justify-center items-end h-full">
+                                                    <div 
+                                                        className="w-full bg-indigo-100 rounded-t-md group-hover:bg-indigo-300 transition-colors relative"
+                                                        style={{ height: `${Math.max(4, height)}%` }}
+                                                    >
+                                                        {val > 0 && (
+                                                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] py-0.5 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                {val}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <span className="text-[10px] text-slate-400 font-bold mt-2 uppercase">{chartData.labels[idx]}</span>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                         )}
+
+                         <div className="grid grid-cols-2 gap-4">
+                             <div className="bg-red-50 p-5 rounded-2xl border border-red-100 text-center relative overflow-hidden">
+                                 <div className="text-3xl font-black text-red-600 mb-1">{queue.length}</div>
+                                 <div className="text-xs font-bold text-red-400 uppercase tracking-wider">Cần ôn bây giờ</div>
                              </div>
-                             <div className="flex justify-between text-xs text-slate-500 font-medium px-1">
-                                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-400"></div> New ({stats.new})</span>
-                                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-400"></div> Learning ({stats.learning})</span>
-                                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div> Review ({stats.review})</span>
-                                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-700"></div> Master ({stats.mastered})</span>
+                             <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-100 text-center">
+                                 <div className="text-3xl font-black text-emerald-600 mb-1">{stats.mastered}</div>
+                                 <div className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Đã thuộc lòng</div>
                              </div>
                          </div>
                      </div>
@@ -126,9 +168,13 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                  <button 
                     onClick={() => setView(queue.length > 0 ? 'review' : 'overview')}
                     disabled={queue.length === 0}
-                    className="w-full mt-8 py-4 bg-slate-900 text-white font-bold text-lg rounded-xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-slate-300 transition-all active:scale-95"
+                    className="w-full mt-6 py-4 bg-slate-900 text-white font-bold text-lg rounded-xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-slate-300 transition-all active:scale-95 flex items-center justify-center gap-2"
                  >
-                    {queue.length > 0 ? `Bắt đầu ôn tập (${queue.length} thẻ)` : 'Không có thẻ nào cần ôn'}
+                    {stats && stats.studiedToday >= stats.dailyLimit && queue.length > 0 ? (
+                        <><span>⚠️</span> Vượt chỉ tiêu ({queue.length} thẻ)</>
+                    ) : (
+                        queue.length > 0 ? `Bắt đầu ôn tập (${queue.length} thẻ)` : 'Không có thẻ nào cần ôn'
+                    )}
                  </button>
              </div>
         </div>
