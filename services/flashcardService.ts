@@ -13,7 +13,6 @@ const ONE_DAY = 24 * 60 * 60 * 1000;
 // ANKI CONSTANTS
 const LEARNING_STEPS = [1, 10]; // Minutes
 const GRADUATING_INTERVAL = 1; // Day
-const EASY_INTERVAL = 4; // Days
 const STARTING_EASE = 2.5;
 
 export interface FlashcardStats {
@@ -380,6 +379,9 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
 export const getIntervalPreviewText = (card: Flashcard, rating: ReviewRating): string => {
     const { interval } = calculateNextReview(card, rating, true);
     
+    // Nếu interval rất lớn (>10000 ngày) tức là Easy (Bỏ qua)
+    if (interval > 10000) return "Xong";
+
     if (interval < 1) {
         // Minutes
         const mins = Math.round(interval * 24 * 60);
@@ -403,6 +405,20 @@ export const calculateNextReview = (
     let { interval, easeFactor, repetitions, step = 0 } = card;
     const now = Date.now();
 
+    // SPECIAL LOGIC: EASY BUTTON -> SKIP FOREVER
+    if (rating === 'easy') {
+        // Gán interval cực lớn (100 năm) để coi như đã thuộc lòng
+        const MASTERED_INTERVAL = 365 * 100; 
+        
+        return {
+            nextReview: now + (MASTERED_INTERVAL * ONE_DAY),
+            interval: MASTERED_INTERVAL,
+            easeFactor, // Ease factor không còn quan trọng
+            repetitions: repetitions + 1,
+            step: 0
+        };
+    }
+
     // Determine State: Learning (< 1 day) vs Review (>= 1 day)
     const isLearning = interval < 1;
 
@@ -414,11 +430,8 @@ export const calculateNextReview = (
             step = 0;
             interval = LEARNING_STEPS[0] / (24 * 60); // 1 minute in days
         } else if (rating === 'hard') {
-            // Anki behavior: Average of steps or 1.5x previous? 
-            // Prompt request: "Khoảng 6 phút (trung bình)"
-            // (1 + 10) / 2 = 5.5 -> ~6m
-            interval = 6 / (24 * 60); 
-            // Step stays same
+            // Anki behavior: Average of steps or 1.5x previous
+            interval = 6 / (24 * 60); // 6 mins
         } else if (rating === 'good') {
             if (step < LEARNING_STEPS.length - 1) {
                 // Move to next step
@@ -427,12 +440,8 @@ export const calculateNextReview = (
             } else {
                 // Graduate
                 interval = GRADUATING_INTERVAL; // 1 day
-                step = 0; // Reset step just in case
+                step = 0;
             }
-        } else if (rating === 'easy') {
-            // Graduate Immediately
-            interval = EASY_INTERVAL; // 4 days
-            step = 0;
         }
 
     } else {
@@ -449,9 +458,6 @@ export const calculateNextReview = (
             easeFactor = Math.max(1.3, easeFactor - 0.15);
         } else if (rating === 'good') {
             interval = interval * easeFactor;
-        } else if (rating === 'easy') {
-            interval = interval * easeFactor * 1.3;
-            easeFactor += 0.15;
         }
     }
 
