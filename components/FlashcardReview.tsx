@@ -1,8 +1,8 @@
 
 
 import React, { useState, useEffect } from 'react';
-import { Flashcard, ReviewRating } from '../types';
-import { updateCardStatus, getFlashcardStats, FlashcardStats, getStudyHistoryChart, ChartData, setDailyLimit } from '../services/flashcardService';
+import { Flashcard, ReviewRating, ChartDataPoint } from '../types';
+import { updateCardStatus, getFlashcardStats, FlashcardStats, getStudyHistoryChart, setDailyLimit } from '../services/flashcardService';
 
 interface FlashcardReviewProps {
   cards: Flashcard[]; // These are the DUE cards
@@ -18,7 +18,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   const [stats, setStats] = useState<FlashcardStats | null>(null);
   
   // Charts & Settings
-  const [chartData, setChartData] = useState<ChartData | null>(null);
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [chartRange, setChartRange] = useState<'week' | 'month' | 'year'>('week');
   const [isEditingLimit, setIsEditingLimit] = useState(false);
   const [tempLimit, setTempLimit] = useState('50');
@@ -82,7 +82,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
 
   const formatInterval = (days: number): string => {
       if (days === 0) return "< 1m";
-      if (days < 1) return "1d"; // Should technically be hours but simplified
+      if (days < 1) return "1d"; 
       if (days < 30) return `${days}d`;
       if (days < 365) return `${Math.round(days/30)}mo`;
       return `${(days/365).toFixed(1)}y`;
@@ -93,7 +93,6 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       const card = queue[currentIndex];
       if (!card) return "";
       
-      // We simulate the calculation logic here for display
       let interval = card.interval;
       const ease = card.easeFactor || 2.5;
 
@@ -112,132 +111,171 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   if (view === 'overview') {
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
-             <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl p-6 md:p-8 animate-in zoom-in duration-300 overflow-y-auto max-h-[90vh]">
+             <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl p-6 md:p-8 animate-in zoom-in duration-300 overflow-y-auto max-h-[95vh]">
                  <div className="flex justify-between items-center mb-6">
-                     <h2 className="text-2xl font-bold text-slate-800">Thống kê học tập</h2>
+                     <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        <span className="text-3xl">📊</span> Thống kê học tập
+                     </h2>
                      <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-2 text-xl">✕</button>
                  </div>
 
                  {stats ? (
-                     <div className="space-y-6">
+                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                          
-                         {/* Daily Limit Status */}
-                         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                             <div className="flex justify-between items-end mb-2">
-                                 <div>
-                                     <h3 className="text-sm font-bold text-slate-500 uppercase flex items-center gap-2">
-                                         Tiến độ Hôm nay
-                                         {isEditingLimit ? (
-                                             <div className="flex items-center gap-2 ml-2">
-                                                <input 
-                                                    type="number" 
-                                                    value={tempLimit} 
-                                                    onChange={(e)=>setTempLimit(e.target.value)} 
-                                                    className="w-16 px-2 py-1 text-sm border rounded"
-                                                />
-                                                <button onClick={handleSaveLimit} className="text-green-600 text-xs font-bold">Lưu</button>
-                                             </div>
-                                         ) : (
-                                             <button onClick={() => setIsEditingLimit(true)} className="text-indigo-500 text-xs hover:underline" title="Chỉnh giới hạn">
-                                                 (Giới hạn: {stats.dailyLimit}) 🖊️
-                                             </button>
-                                         )}
-                                     </h3>
-                                     <div className="text-3xl font-black text-slate-800">
-                                         {stats.studiedToday} <span className="text-lg text-slate-400 font-medium">/ {stats.dailyLimit} thẻ</span>
-                                     </div>
-                                 </div>
-                                 <div className="text-right">
-                                     {stats.backlog > 0 && (
-                                         <div className="flex flex-col items-end animate-pulse">
-                                             <div className="text-red-500 font-bold text-sm bg-red-50 px-3 py-1 rounded-full border border-red-100 mb-1">
-                                                 ⚠️ Nợ bài: {stats.backlog} thẻ
-                                             </div>
-                                             <span className="text-[10px] text-red-400">Bạn đã bỏ lỡ bài ôn tập</span>
+                         {/* LEFT COLUMN: Daily Status & Big Stats */}
+                         <div className="space-y-6">
+                             {/* Daily Limit */}
+                             <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                                <div className="flex justify-between items-center mb-4">
+                                     <h3 className="text-xs font-bold text-slate-500 uppercase">Hôm nay</h3>
+                                     {isEditingLimit ? (
+                                         <div className="flex items-center gap-2">
+                                            <input 
+                                                type="number" 
+                                                value={tempLimit} 
+                                                onChange={(e)=>setTempLimit(e.target.value)} 
+                                                className="w-14 px-1 py-0.5 text-sm border rounded"
+                                            />
+                                            <button onClick={handleSaveLimit} className="text-green-600 text-xs font-bold">Lưu</button>
                                          </div>
+                                     ) : (
+                                         <button onClick={() => setIsEditingLimit(true)} className="text-slate-400 text-[10px] hover:text-indigo-500 hover:underline">
+                                             Giới hạn: {stats.dailyLimit} 🖊️
+                                         </button>
                                      )}
-                                 </div>
+                                </div>
+                                
+                                <div className="text-4xl font-black text-slate-800 mb-2">
+                                    {stats.studiedToday} <span className="text-sm font-medium text-slate-400">/ {stats.dailyLimit}</span>
+                                </div>
+                                <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden mb-4">
+                                    <div 
+                                        className={`h-full rounded-full transition-all ${stats.studiedToday >= stats.dailyLimit ? 'bg-green-500' : 'bg-indigo-500'}`}
+                                        style={{ width: `${Math.min(100, (stats.studiedToday / stats.dailyLimit) * 100)}%` }}
+                                    ></div>
+                                </div>
+
+                                {stats.backlog > 0 && (
+                                    <div className="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-xs font-bold border border-red-100 flex items-center gap-2">
+                                        <span>⚠️</span> Nợ bài: {stats.backlog} thẻ
+                                    </div>
+                                )}
                              </div>
-                             <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden">
-                                 <div 
-                                    className={`h-full rounded-full transition-all ${stats.studiedToday >= stats.dailyLimit ? 'bg-green-500' : 'bg-indigo-500'}`}
-                                    style={{ width: `${Math.min(100, (stats.studiedToday / stats.dailyLimit) * 100)}%` }}
-                                 ></div>
+
+                             {/* Start Button */}
+                             <button 
+                                onClick={() => setView(queue.length > 0 ? 'review' : 'overview')}
+                                disabled={queue.length === 0}
+                                className="w-full py-4 bg-slate-900 text-white font-bold text-lg rounded-xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2"
+                             >
+                                {stats.studiedToday >= stats.dailyLimit && queue.length > 0 ? (
+                                    <><span>💪</span> Học vượt chỉ tiêu ({queue.length})</>
+                                ) : (
+                                    queue.length > 0 ? `Bắt đầu ôn tập (${queue.length})` : 'Đã hoàn thành!'
+                                )}
+                             </button>
+
+                             {/* Small Stats Grid */}
+                             <div className="grid grid-cols-2 gap-3">
+                                 <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                                     <div className="text-2xl font-black text-emerald-600">{stats.mastered}</div>
+                                     <div className="text-[10px] font-bold text-emerald-800 uppercase">Thuộc lòng</div>
+                                 </div>
+                                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                     <div className="text-2xl font-black text-blue-600">{stats.learning}</div>
+                                     <div className="text-[10px] font-bold text-blue-800 uppercase">Đang học</div>
+                                 </div>
                              </div>
                          </div>
 
-                         {/* Chart Section */}
-                         {chartData && (
-                            <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="text-sm font-bold text-slate-400 uppercase">Biểu đồ ôn tập</h3>
-                                    <div className="flex bg-slate-100 p-1 rounded-lg">
-                                        {(['week', 'month', 'year'] as const).map(r => (
-                                            <button 
-                                                key={r}
-                                                onClick={() => setChartRange(r)}
-                                                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${chartRange === r ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                            >
-                                                {r === 'week' ? 'Tuần' : r === 'month' ? 'Tháng' : 'Năm'}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className="flex items-end justify-between h-40 gap-1 pb-2 overflow-x-auto">
-                                    {chartData.values.map((val, idx) => {
-                                        const max = Math.max(...chartData.values, 5); // Scale
-                                        const height = (val / max) * 100;
-                                        return (
-                                            <div key={idx} className="flex-1 min-w-[20px] flex flex-col items-center group">
-                                                <div className="relative w-full flex justify-center items-end h-full">
-                                                    <div 
-                                                        className="w-full mx-0.5 bg-indigo-100 rounded-t-sm group-hover:bg-indigo-300 transition-colors relative"
-                                                        style={{ height: `${Math.max(2, height)}%` }}
-                                                    >
-                                                        {val > 0 && (
-                                                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] py-0.5 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">
-                                                                {val} thẻ
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {/* Only show label for every nth item if too many */}
-                                                {(chartRange === 'week' || chartRange === 'year' || idx % 5 === 0) && (
-                                                     <span className="text-[9px] text-slate-400 font-bold mt-2 uppercase truncate w-full text-center">{chartData.labels[idx]}</span>
-                                                )}
-                                            </div>
-                                        )
-                                    })}
+                         {/* RIGHT COLUMN: Chart (Spanning 2 cols) */}
+                         <div className="md:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Lịch sử ôn tập</h3>
+                                <div className="flex bg-slate-100 p-1 rounded-lg">
+                                    {(['week', 'month', 'year'] as const).map(r => (
+                                        <button 
+                                            key={r}
+                                            onClick={() => setChartRange(r)}
+                                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${chartRange === r ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                                        >
+                                            {r === 'week' ? 'Tuần' : r === 'month' ? 'Tháng' : 'Năm'}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
-                         )}
 
-                         <div className="grid grid-cols-2 gap-4">
-                             <div className="bg-red-50 p-5 rounded-2xl border border-red-100 text-center relative overflow-hidden">
-                                 <div className="text-3xl font-black text-red-600 mb-1">{queue.length}</div>
-                                 <div className="text-xs font-bold text-red-400 uppercase tracking-wider">Cần ôn bây giờ</div>
-                             </div>
-                             <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-100 text-center">
-                                 <div className="text-3xl font-black text-emerald-600 mb-1">{stats.mastered}</div>
-                                 <div className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Đã thuộc lòng</div>
-                             </div>
+                            {/* ANKI STYLE CHART */}
+                            <div className="flex-1 min-h-[200px] flex items-end gap-2 sm:gap-4 pb-2 border-b border-slate-200 relative">
+                                {/* Grid lines background */}
+                                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-10">
+                                    <div className="w-full border-t border-slate-900"></div>
+                                    <div className="w-full border-t border-slate-900"></div>
+                                    <div className="w-full border-t border-slate-900"></div>
+                                    <div className="w-full border-t border-slate-900"></div>
+                                </div>
+
+                                {chartData.length > 0 ? chartData.map((data, idx) => {
+                                    // Scale based on max total
+                                    const maxVal = Math.max(...chartData.map(d => d.total), 5);
+                                    const heightPercent = (data.total / maxVal) * 100;
+
+                                    // Segments height calculation
+                                    const hAgain = (data.again / data.total) * 100;
+                                    const hHard = (data.hard / data.total) * 100;
+                                    const hGood = (data.good / data.total) * 100;
+                                    const hEasy = (data.easy / data.total) * 100;
+
+                                    return (
+                                        <div key={idx} className="flex-1 flex flex-col items-center group relative min-w-[15px]">
+                                            {/* Tooltip */}
+                                            <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-[10px] p-2 rounded pointer-events-none z-10 w-max shadow-lg">
+                                                <div className="font-bold mb-1 border-b border-slate-600 pb-1">{data.label}</div>
+                                                <div className="text-sky-300">Easy: {data.easy}</div>
+                                                <div className="text-emerald-300">Good: {data.good}</div>
+                                                <div className="text-orange-300">Hard: {data.hard}</div>
+                                                <div className="text-rose-300">Again: {data.again}</div>
+                                                <div className="mt-1 pt-1 border-t border-slate-600 font-bold">Total: {data.total}</div>
+                                            </div>
+
+                                            {/* Stacked Bar */}
+                                            <div 
+                                                className="w-full max-w-[30px] rounded-t-sm overflow-hidden flex flex-col-reverse relative bg-slate-100 hover:brightness-90 transition-all cursor-crosshair"
+                                                style={{ height: `${Math.max(2, heightPercent)}%` }}
+                                            >
+                                                {/* Easy (Blue) */}
+                                                {data.easy > 0 && <div style={{ height: `${hEasy}%` }} className="bg-sky-500 w-full"></div>}
+                                                {/* Good (Green) */}
+                                                {data.good > 0 && <div style={{ height: `${hGood}%` }} className="bg-emerald-500 w-full"></div>}
+                                                {/* Hard (Orange) */}
+                                                {data.hard > 0 && <div style={{ height: `${hHard}%` }} className="bg-orange-400 w-full"></div>}
+                                                {/* Again (Red) */}
+                                                {data.again > 0 && <div style={{ height: `${hAgain}%` }} className="bg-rose-500 w-full"></div>}
+                                            </div>
+                                            
+                                            {/* Label */}
+                                            {(chartRange === 'week' || chartRange === 'year' || idx % 5 === 0) && (
+                                                <span className="text-[10px] text-slate-400 font-bold mt-2 rotate-0 truncate w-full text-center">{data.label}</span>
+                                            )}
+                                        </div>
+                                    );
+                                }) : (
+                                    <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Chưa có dữ liệu học tập</div>
+                                )}
+                            </div>
+                            
+                            {/* Legend */}
+                            <div className="flex gap-4 justify-center mt-4">
+                                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-500 rounded-sm"></div><span className="text-[10px] font-bold text-slate-500">Again</span></div>
+                                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-orange-400 rounded-sm"></div><span className="text-[10px] font-bold text-slate-500">Hard</span></div>
+                                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-sm"></div><span className="text-[10px] font-bold text-slate-500">Good</span></div>
+                                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-sky-500 rounded-sm"></div><span className="text-[10px] font-bold text-slate-500">Easy</span></div>
+                            </div>
                          </div>
                      </div>
                  ) : (
                      <div className="text-center py-10">Đang tải thống kê...</div>
                  )}
-
-                 <button 
-                    onClick={() => setView(queue.length > 0 ? 'review' : 'overview')}
-                    disabled={queue.length === 0}
-                    className="w-full mt-6 py-4 bg-slate-900 text-white font-bold text-lg rounded-xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-slate-300 transition-all active:scale-95 flex items-center justify-center gap-2"
-                 >
-                    {stats && stats.studiedToday >= stats.dailyLimit && queue.length > 0 ? (
-                        <><span>⚠️</span> Vượt chỉ tiêu ngày ({queue.length} thẻ)</>
-                    ) : (
-                        queue.length > 0 ? `Bắt đầu ôn tập (${queue.length} thẻ)` : 'Không có thẻ nào cần ôn'
-                    )}
-                 </button>
              </div>
         </div>
       );
@@ -338,7 +376,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
             </button>
         </div>
         
-        {/* Spacer for non-flipped state to maintain layout */}
+        {/* Spacer for non-flipped state */}
         {!isFlipped && <div className="h-[84px] flex items-center justify-center text-white/30 text-sm animate-pulse">Đang chờ lật thẻ...</div>}
 
       </div>

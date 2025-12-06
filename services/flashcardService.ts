@@ -1,6 +1,6 @@
 
 
-import { Flashcard, ReviewRating, ReviewLog } from "../types";
+import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint } from "../types";
 import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB } from "./db";
 import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey } from "./firebaseService";
 
@@ -22,11 +22,6 @@ export interface FlashcardStats {
     studiedToday: number;
     dailyLimit: number;
     backlog: number; // Nợ bài (số bài due nhưng bị ẩn do giới hạn ngày)
-}
-
-export interface ChartData {
-    labels: string[];
-    values: number[];
 }
 
 // --- SYNC LOGIC ---
@@ -178,10 +173,9 @@ export const getFlashcardStats = async (): Promise<FlashcardStats> => {
     };
 };
 
-export const getStudyHistoryChart = async (range: 'week' | 'month' | 'year'): Promise<ChartData> => {
+export const getStudyHistoryChart = async (range: 'week' | 'month' | 'year'): Promise<ChartDataPoint[]> => {
     const logs = await getReviewLogsFromDB();
-    const labels: string[] = [];
-    const values: number[] = [];
+    const data: ChartDataPoint[] = [];
     
     if (range === 'year') {
         // 12 months
@@ -198,11 +192,17 @@ export const getStudyHistoryChart = async (range: 'week' | 'month' | 'year'): Pr
             nextMonth.setMonth(nextMonth.getMonth() + 1);
             const monthEnd = nextMonth.getTime();
 
-            const count = logs.filter(l => l.timestamp >= monthStart && l.timestamp < monthEnd).length;
+            // Filter logs for this month
+            const monthLogs = logs.filter(l => l.timestamp >= monthStart && l.timestamp < monthEnd);
             
-            const label = d.toLocaleDateString('vi-VN', { month: 'short' }); // Thg 1...
-            labels.push(label);
-            values.push(count);
+            data.push({
+                label: d.toLocaleDateString('vi-VN', { month: 'short' }),
+                total: monthLogs.length,
+                again: monthLogs.filter(l => l.rating === 'again').length,
+                hard: monthLogs.filter(l => l.rating === 'hard').length,
+                good: monthLogs.filter(l => l.rating === 'good').length,
+                easy: monthLogs.filter(l => l.rating === 'easy').length,
+            });
         }
     } else {
         // Week (7 days) or Month (30 days)
@@ -216,20 +216,25 @@ export const getStudyHistoryChart = async (range: 'week' | 'month' | 'year'): Pr
             const dayStart = d.getTime();
             const dayEnd = dayStart + ONE_DAY;
             
-            const count = logs.filter(l => l.timestamp >= dayStart && l.timestamp < dayEnd).length;
+            const dayLogs = logs.filter(l => l.timestamp >= dayStart && l.timestamp < dayEnd);
             
-            // Format: Mon (Week) or 01/05 (Month)
+            // Format: Mon (Week) or 01 (Month)
             const options: Intl.DateTimeFormatOptions = range === 'month' 
-                ? { day: '2-digit', month: '2-digit' }
+                ? { day: 'numeric' }
                 : { weekday: 'short' };
                 
-            const label = d.toLocaleDateString('vi-VN', options); 
-            labels.push(label);
-            values.push(count);
+            data.push({
+                label: d.toLocaleDateString('vi-VN', options),
+                total: dayLogs.length,
+                again: dayLogs.filter(l => l.rating === 'again').length,
+                hard: dayLogs.filter(l => l.rating === 'hard').length,
+                good: dayLogs.filter(l => l.rating === 'good').length,
+                easy: dayLogs.filter(l => l.rating === 'easy').length,
+            });
         }
     }
     
-    return { labels, values };
+    return data;
 };
 
 // --- SM-2 ALGORITHM ---

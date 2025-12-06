@@ -64,6 +64,15 @@ export interface StudentAccount {
     lastActive?: number;
 }
 
+export interface ChartDataPoint {
+    label: string;
+    total: number;
+    again: number;
+    hard: number;
+    good: number;
+    easy: number;
+}
+
 declare global {
   const pdfjsLib: any;
 }
