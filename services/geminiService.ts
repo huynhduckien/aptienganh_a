@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
 import { translateTextFallback } from "./translationService";
@@ -230,19 +231,23 @@ const cleanShortMeaning = (text: string): string => {
 export const generateLessonForChunk = async (textChunk: string): Promise<LessonContent> => {
   const isValidKey = apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init";
   
+  // Detect if text is Chinese (Traditional/Simplified)
+  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(textChunk);
+
   if (isValidKey && checkRateLimit()) {
       try {
           return await withRetry(async () => {
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: `
-                You are an academic English assistant.
+                You are a versatile academic assistant.
                 INPUT TEXT: "${textChunk}"
 
                 TASKS:
-                1. "cleanedSourceText": Clean the INPUT text (fix line breaks, remove PDF artifacts). **MUST REMAIN IN ENGLISH**. Do NOT translate this field.
-                2. "referenceTranslation": Translate the cleaned English text into Vietnamese (Academic style).
-                3. "keyTerms": Extract 3 difficult terms (English term + Vietnamese meaning).
+                1. "cleanedSourceText": Clean the INPUT text (fix formatting). 
+                   ${isChinese ? '**KEEP IT IN TRADITIONAL CHINESE (Or source language). DO NOT TRANSLATE TO ENGLISH.**' : '**KEEP IT IN ENGLISH. DO NOT TRANSLATE.**'}
+                2. "referenceTranslation": Translate the cleaned text into Vietnamese (Academic style).
+                3. "keyTerms": Extract 3 difficult terms (Term + Vietnamese meaning).
 
                 Return JSON only.
                 `,
@@ -286,21 +291,24 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
     if (!checkRateLimit() || !apiKey || apiKey.length < 10) {
          return await fetchVietnameseFallback(phrase);
     }
+    
+    // Detect Chinese
+    const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(phrase);
 
     try {
         const result = await withRetry(async () => {
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: `
-                Act as a Dictionary for an Academic English learner.
+                Act as a Dictionary for a learner.
                 Term: "${phrase}"
                 Context: "${fullContext}"
                 
                 OUTPUT JSON ONLY:
                 {
-                  "shortMeaning": "TRANSLATE term to Vietnamese. Concise.",
-                  "phonetic": "IPA format (JUST text, e.g. wɜːrd, NO slashes)",
-                  "detailedExplanation": "Explain meaning and usage in this context in Vietnamese."
+                  "shortMeaning": "TRANSLATE term to Vietnamese ONLY. Max 5 words. No brackets.",
+                  "phonetic": "${isChinese ? 'Pinyin' : 'IPA format (e.g. wɜːrd)'}",
+                  "detailedExplanation": "${isChinese ? '[Pinyin] [Hanzi] Meaning. Context.' : '[Part of speech] Definition. Usage.'} Explain in Vietnamese."
                 }
                 `,
                 config: { 

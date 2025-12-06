@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { LessonView } from './components/LessonView';
@@ -202,7 +203,10 @@ const App: React.FC = () => {
       
       // 1. Chinese (Hanzi detection)
       if (/[\u4e00-\u9fa5]/.test(text)) {
-          utterance.lang = 'zh-CN';
+          // Check for Traditional vs Simplified context (basic heuristic)
+          // Usually zh-TW is safer for Traditional, zh-CN for Simplified.
+          // For general Hanzi, zh-TW is often preferred if we expect Traditional.
+          utterance.lang = 'zh-TW'; 
       } 
       // 2. French (Common accents detection: é, à, è, ù, â, ê, î, ô, û, ë, ï, ü, ÿ, ç, œ, æ)
       else if (/[éàèùâêîôûëïüÿçœæ]/i.test(text)) {
