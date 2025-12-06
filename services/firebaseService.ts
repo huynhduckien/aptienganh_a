@@ -2,7 +2,7 @@
 import { Flashcard } from "../types";
 import { DictionaryResponse } from "./geminiService";
 
-// URL Firebase của bạn
+// URL Firebase chính thức của bạn
 const FIREBASE_URL = "https://nail-schedule-test-default-rtdb.europe-west1.firebasedatabase.app/";
 
 // --- FLASHCARDS ---

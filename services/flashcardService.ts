@@ -22,24 +22,42 @@ export const getFlashcards = async (): Promise<Flashcard[]> => {
   try {
     let localCards = await getFlashcardsFromDB();
 
+    // Sync logic: Chỉ chạy 1 lần khi mở app (hoặc khi cần thiết)
     if (!hasSynced && navigator.onLine) {
        const cloudCards = await fetchCloudFlashcards();
+       
        if (cloudCards.length > 0) {
            const mergedMap = new Map<string, Flashcard>();
-           localCards.forEach(c => mergedMap.set(c.id, c));
-           cloudCards.forEach(c => mergedMap.set(c.id, c));
            
-           const mergedCards = Array.from(mergedMap.values());
-           for (const card of mergedCards) {
-               // Migrate old cards if needed
-               if (!card.easeFactor) {
-                   card.easeFactor = 2.5;
-                   card.interval = 0;
-                   card.repetitions = 0;
+           // 1. Đưa local cards vào map trước
+           localCards.forEach(c => mergedMap.set(c.id, c));
+           
+           // 2. Hợp nhất với Cloud cards (Smart Merge)
+           for (const cloudCard of cloudCards) {
+               const localCard = mergedMap.get(cloudCard.id);
+               
+               if (!localCard) {
+                   // Nếu máy chưa có -> Lấy từ Cloud về
+                   mergedMap.set(cloudCard.id, cloudCard);
+                   await saveFlashcardToDB(cloudCard);
+               } else {
+                   // Nếu máy đã có -> So sánh xem cái nào "xịn" hơn (học nhiều hơn)
+                   // Ưu tiên bản nào có số lần học (repetitions) lớn hơn hoặc ngày review xa hơn
+                   const localProgress = (localCard.repetitions || 0) + (localCard.interval || 0);
+                   const cloudProgress = (cloudCard.repetitions || 0) + (cloudCard.interval || 0);
+                   
+                   if (cloudProgress > localProgress) {
+                       // Cloud mới hơn -> Cập nhật Local
+                       mergedMap.set(cloudCard.id, cloudCard);
+                       await saveFlashcardToDB(cloudCard);
+                   } else if (localProgress > cloudProgress) {
+                       // Local mới hơn (học offline) -> Đẩy ngược lên Cloud
+                       saveCloudFlashcard(localCard);
+                   }
                }
-               await saveFlashcardToDB(card);
            }
-           localCards = mergedCards;
+           
+           localCards = Array.from(mergedMap.values());
        }
        hasSynced = true;
     }
@@ -135,9 +153,6 @@ export const calculateNextReview = (card: Flashcard, rating: ReviewRating): { ne
         easeFactor += 0.15;
     } else {
         // Good: Standard SM-2 calc
-        // EF' = EF + (0.1 - (5-q)*(0.08 + (5-q)*0.02))
-        // We simplified mapping: Hard=3, Good=4, Easy=5
-        // Good (4): EF + 0 -> No change needed in standard calc, but let's keep it stable
     }
 
     repetitions++;
@@ -167,6 +182,7 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
       level: interval > 21 ? 2 : 1 // Simple bucket for UI
   };
   
+  // Lưu cả Local và Cloud
   await saveFlashcardToDB(updatedCard);
   saveCloudFlashcard(updatedCard);
 };
