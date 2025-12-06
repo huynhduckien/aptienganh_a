@@ -1,11 +1,11 @@
 import { ProcessedChunk, SavedPaper, Flashcard } from "../types";
 
 const DB_NAME = 'PaperLingoDB';
-const DB_VERSION = 2; // Tăng version để thêm bảng flashcards
+const DB_VERSION = 2;
 const STORE_PAPERS = 'papers';
 const STORE_FLASHCARDS = 'flashcards';
 
-// Hàm tạo ID an toàn (thay thế crypto.randomUUID có thể bị lỗi trên http)
+// Hàm tạo ID an toàn
 export const generateId = (): string => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 };
@@ -43,8 +43,8 @@ export const savePaperToDB = async (paper: SavedPaper): Promise<void> => {
     const store = transaction.objectStore(STORE_PAPERS);
     const request = store.put(paper);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
   });
 };
 
@@ -81,20 +81,29 @@ export const deletePaperFromDB = async (id: string): Promise<void> => {
     return new Promise((resolve, reject) => {
       const transaction = db.transaction([STORE_PAPERS], 'readwrite');
       const store = transaction.objectStore(STORE_PAPERS);
-      const request = store.delete(id);
+      
+      // Thực hiện lệnh xóa
+      store.delete(id);
   
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      // Quan trọng: Đợi transaction hoàn tất hẳn rồi mới resolve
+      // Điều này ngăn chặn việc đọc lại dữ liệu khi việc xóa chưa xong
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
     });
 };
 
 export const updatePaperProgress = async (id: string, chunks: ProcessedChunk[], currentChunkIndex: number): Promise<void> => {
-    const paper = await getPaperFromDB(id);
-    if (paper) {
-        paper.processedChunks = chunks;
-        paper.currentChunkIndex = currentChunkIndex;
-        paper.lastOpened = Date.now();
-        await savePaperToDB(paper);
+    // Với update, chúng ta cần cẩn thận không ghi đè nếu paper đã bị xóa
+    try {
+        const paper = await getPaperFromDB(id);
+        if (paper) {
+            paper.processedChunks = chunks;
+            paper.currentChunkIndex = currentChunkIndex;
+            paper.lastOpened = Date.now();
+            await savePaperToDB(paper);
+        }
+    } catch (e) {
+        console.warn("Could not update progress, paper might be deleted", e);
     }
 };
 
@@ -105,9 +114,9 @@ export const saveFlashcardToDB = async (card: Flashcard): Promise<void> => {
     return new Promise((resolve, reject) => {
         const tx = db.transaction([STORE_FLASHCARDS], 'readwrite');
         const store = tx.objectStore(STORE_FLASHCARDS);
-        const request = store.put(card);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
+        store.put(card);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
     });
 };
 

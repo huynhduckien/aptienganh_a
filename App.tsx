@@ -40,7 +40,7 @@ const App: React.FC = () => {
         const savedPapers = await getAllPapersFromDB();
         setPapers(savedPapers);
         if (savedPapers.length === 0 && appState === 'dashboard') {
-            setAppState('dashboard'); 
+            // Stay on dashboard, list is just empty
         }
     } catch (e) {
         console.error("Failed to load papers", e);
@@ -106,9 +106,19 @@ const App: React.FC = () => {
   };
 
   const handleDeletePaper = async (id: string) => {
-      if (confirm("Bạn có chắc chắn muốn xóa bài báo này?")) {
-          await deletePaperFromDB(id);
-          loadPapers();
+      if (window.confirm("Bạn có chắc chắn muốn xóa bài báo này?")) {
+          // 1. Cập nhật giao diện ngay lập tức (Optimistic Update)
+          setPapers(prev => prev.filter(p => p.id !== id));
+
+          try {
+              // 2. Xóa trong database
+              await deletePaperFromDB(id);
+              // Không cần loadPapers() lại nếu không có lỗi, vì state đã đúng
+          } catch (error) {
+              console.error("Failed to delete paper", error);
+              alert("Không thể xóa bài báo. Vui lòng thử lại.");
+              loadPapers(); // Rollback nếu lỗi
+          }
       }
   };
 
