@@ -4,25 +4,19 @@ import { LessonContent } from "../types";
 import { translateTextFallback } from "./translationService";
 
 // Khởi tạo AI Client
-// Lưu ý: process.env.API_KEY được Vite điền giá trị vào lúc Build thông qua file vite.config.ts
 const apiKey = process.env.API_KEY;
 
-// DEBUG LOGGING (Sẽ hiện trong F12 Console trình duyệt)
-console.log("--- DEBUG API KEY STATUS ---");
+// DEBUG LOGGING
 if (!apiKey || apiKey.length < 10) {
     console.warn("⚠️ API Key đang bị RỖNG hoặc KHÔNG HỢP LỆ.");
-    console.warn("Trên Vercel: Vào Settings -> Environment Variables -> Thêm VITE_API_KEY");
-} else {
-    console.log("✅ API Key đã được nạp thành công. Độ dài:", apiKey.length);
-}
+} 
 
 const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_init" });
 
 // Use standard Flash model for better quality translation
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-2.0-flash-lite-preview-02-05";
 
 // --- PERSISTENT CACHE ---
-// Load cache from LocalStorage on init
 const CACHE_KEY = 'paperlingo_dictionary_cache_v1';
 const loadCache = (): Map<string, DictionaryResponse> => {
     try {
@@ -47,29 +41,25 @@ const saveCacheToStorage = () => {
 };
 
 // --- RATE LIMITER CONFIGURATION ---
-const MAX_REQUESTS_PER_MINUTE = 12; // Lower limit to be safe
+const MAX_REQUESTS_PER_MINUTE = 12;
 const requestTimestamps: number[] = [];
 
-// Helper: Check and update rate limit
 const checkRateLimit = (): boolean => {
   const now = Date.now();
-  // Filter out timestamps older than 1 minute
   while (requestTimestamps.length > 0 && requestTimestamps[0] < now - 60000) {
     requestTimestamps.shift();
   }
   
   if (requestTimestamps.length >= MAX_REQUESTS_PER_MINUTE) {
-    return false; // Rate limit exceeded
+    return false; 
   }
 
   requestTimestamps.push(now);
   return true;
 };
 
-// Helper: Wait for a specified duration
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: Retry wrapper with Exponential Backoff
 async function withRetry<T>(fn: () => Promise<T>, retries = 2, initialDelay = 1000): Promise<T> {
   let currentDelay = initialDelay;
   
@@ -77,7 +67,6 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, initialDelay = 10
     try {
       return await fn();
     } catch (error: any) {
-      // Check for 429 (Too Many Requests) or Quota related errors
       const isQuotaError = 
         error.message?.includes('429') || 
         error.message?.includes('quota') || 
@@ -85,7 +74,6 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, initialDelay = 10
         error.status === 429;
 
       if (isQuotaError) {
-         // If quota error, DON'T retry too much, fail fast to switch to fallback
          console.warn("Gemini Quota Exceeded. Switching to fallback immediately.");
          throw new Error("QUOTA_EXCEEDED");
       }
@@ -104,17 +92,10 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, initialDelay = 10
 const lessonSchema: Schema = {
   type: Type.OBJECT,
   properties: {
-    cleanedSourceText: {
-        type: Type.STRING,
-        description: "The cleaned English source text."
-    },
-    referenceTranslation: {
-      type: Type.STRING,
-      description: "A natural, high-quality Vietnamese translation.",
-    },
+    cleanedSourceText: { type: Type.STRING },
+    referenceTranslation: { type: Type.STRING },
     keyTerms: {
       type: Type.ARRAY,
-      description: "List of 3-5 difficult terms.",
       items: {
         type: Type.OBJECT,
         properties: {
@@ -128,7 +109,6 @@ const lessonSchema: Schema = {
   required: ["cleanedSourceText", "referenceTranslation", "keyTerms"],
 };
 
-// Fallback Data Generators
 const getFallbackLesson = (text: string, translatedText?: string): LessonContent => ({
     cleanedSourceText: text,
     referenceTranslation: translatedText || "Hệ thống đang bận. Vui lòng tự dịch và kiểm tra sau.",
@@ -136,7 +116,7 @@ const getFallbackLesson = (text: string, translatedText?: string): LessonContent
     source: 'Fallback'
 });
 
-// HYBRID FALLBACK: EN Phonetics + VI Meaning
+// IMPROVED FALLBACK: Better Phonetic Extraction
 const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse> => {
     let phonetic = "";
     let definitionEN = "";
@@ -146,11 +126,26 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
         if (response.ok) {
             const data = await response.json();
             const firstEntry = data[0];
-            phonetic = firstEntry.phonetic || (firstEntry.phonetics.find((p:any) => p.text)?.text) || "";
-            if (phonetic) phonetic = phonetic.replace(/\//g, '');
+            
+            // Logic lấy phiên âm thông minh hơn
+            if (firstEntry.phonetics && Array.isArray(firstEntry.phonetics)) {
+                // Ưu tiên cái nào có text và audio, hoặc ít nhất là text
+                const validPhonetic = firstEntry.phonetics.find((p: any) => p.text && p.text.trim() !== "");
+                if (validPhonetic) {
+                    phonetic = validPhonetic.text;
+                } else if (firstEntry.phonetic) {
+                    phonetic = firstEntry.phonetic;
+                }
+            }
+            
+            // Làm sạch dấu ngoặc nếu có (để hiển thị thống nhất)
+            phonetic = phonetic.replace(/^[/\[]/, '').replace(/[/\]]$/, '');
+
             definitionEN = firstEntry.meanings[0]?.definitions[0]?.definition || "";
         }
-    } catch (e) { }
+    } catch (e) { 
+        console.warn("Dictionary API failed", e);
+    }
 
     let vietnameseMeaning = "";
     try {
@@ -161,7 +156,7 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
 
     return {
         shortMeaning: vietnameseMeaning,
-        phonetic: phonetic,
+        phonetic: phonetic, // Trả về dạng text thô (ví dụ: "həˈləʊ"), UI sẽ tự thêm dấu /.../
         detailedExplanation: `[Chế độ Dịch máy]\n\nNghĩa tiếng Việt: ${vietnameseMeaning}\n\n${definitionEN ? `Định nghĩa gốc (EN): ${definitionEN}` : ""}`
     };
 };
@@ -175,7 +170,6 @@ const getFallbackDictionary = (term: string, reason: 'quota' | 'rate_limit' = 'q
 });
 
 export const generateLessonForChunk = async (textChunk: string): Promise<LessonContent> => {
-  // 1. Try AI First
   const isValidKey = apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init";
   
   if (isValidKey && checkRateLimit()) {
@@ -208,14 +202,11 @@ export const generateLessonForChunk = async (textChunk: string): Promise<LessonC
           });
       } catch (error: any) {
           console.warn("AI Failed (Quota or Error). Switching to Fallback.", error.message);
-          // If error is specifically quota, we proceed to fallback immediately
       }
   }
 
-  // 2. Fallback: Use Free Translation API
   try {
       const translated = await translateTextFallback(textChunk);
-      // Mark as Fallback so UI shows "Google Translate Mode"
       return getFallbackLesson(textChunk, translated);
   } catch (err) {
       return getFallbackLesson(textChunk, "Không thể dịch đoạn này. Vui lòng thử lại sau.");
@@ -233,7 +224,6 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
     if (dictionaryCache.has(cacheKey)) return dictionaryCache.get(cacheKey)!;
 
     if (!checkRateLimit()) {
-         // Rate limit hit -> Go to fallback immediately to save quota
          try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'rate_limit'); }
     }
 
@@ -241,12 +231,11 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
         try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'quota'); }
     }
 
-    // Try AI
     try {
         const result = await withRetry(async () => {
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
-                contents: `Define "${phrase}" in Vietnamese (context: "${fullContext}"). JSON: shortMeaning, phonetic, detailedExplanation.`,
+                contents: `Define "${phrase}" in Vietnamese (context: "${fullContext}"). JSON: shortMeaning, phonetic (IPA), detailedExplanation.`,
                 config: { responseMimeType: "application/json", responseSchema: { type: Type.OBJECT, properties: { shortMeaning: {type:Type.STRING}, phonetic: {type:Type.STRING}, detailedExplanation: {type:Type.STRING}}}}
             });
             let text = response.text || "";
@@ -260,7 +249,6 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
         return result;
 
     } catch (error) {
-        // AI Failed -> Use Fallback
         try {
             return await fetchVietnameseFallback(phrase);
         } catch (e) {

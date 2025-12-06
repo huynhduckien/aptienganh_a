@@ -5,32 +5,40 @@ export interface KeyTerm {
 }
 
 export interface LessonContent {
-  cleanedSourceText: string; // The AI-cleaned version of the source text (no headers/footers)
-  referenceTranslation: string; // The AI's full translation of the chunk
-  keyTerms: KeyTerm[]; // Explanations for difficult words/phrases in this specific chunk
-  source?: 'AI' | 'Fallback'; // Flag to indicate if translation is from AI or Fallback
+  cleanedSourceText: string; 
+  referenceTranslation: string; 
+  keyTerms: KeyTerm[]; 
+  source?: 'AI' | 'Fallback'; 
 }
 
 export interface ProcessedChunk {
   id: number;
-  text: string; // The raw English text
+  text: string; 
   isCompleted: boolean;
-  content?: LessonContent; // Populated by AI
+  content?: LessonContent; 
 }
 
-// SRS Flashcard Structure
+export interface SavedPaper {
+  id: string; // UUID
+  fileName: string;
+  originalText: string;
+  processedChunks: ProcessedChunk[];
+  currentChunkIndex: number;
+  createdAt: number;
+  lastOpened: number;
+}
+
 export interface Flashcard {
   id: string;
   term: string;
   meaning: string;
   explanation: string;
   phonetic: string;
-  level: number; // 0 = New, 1+ = Learned levels
-  nextReview: number; // Timestamp
+  level: number; 
+  nextReview: number; 
   createdAt: number;
 }
 
-// Declaration for the global PDF.js library loaded via CDN
 declare global {
   const pdfjsLib: any;
 }

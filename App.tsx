@@ -1,29 +1,53 @@
+
 import React, { useState, useEffect } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { LessonView } from './components/LessonView';
+import { Dashboard } from './components/Dashboard';
 import { chunkTextByLevel, DifficultyLevel } from './services/pdfService';
-import { ProcessedChunk } from './types';
+import { ProcessedChunk, SavedPaper } from './types';
 import { saveFlashcard, getDueFlashcards } from './services/flashcardService';
 import { FlashcardReview } from './components/FlashcardReview';
+import { savePaperToDB, getAllPapersFromDB, updatePaperProgress, deletePaperFromDB } from './services/db';
+
+type AppState = 'dashboard' | 'upload' | 'level_select' | 'study';
 
 const App: React.FC = () => {
+  const [appState, setAppState] = useState<AppState>('dashboard');
+  
+  // Paper Data
+  const [papers, setPapers] = useState<SavedPaper[]>([]);
+  const [currentPaperId, setCurrentPaperId] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string>('');
+  const [rawText, setRawText] = useState<string>('');
   const [chunks, setChunks] = useState<ProcessedChunk[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState<number>(0);
-  const [fileName, setFileName] = useState<string>('');
-  
-  const [appState, setAppState] = useState<'upload' | 'level_select' | 'study'>('upload');
-  const [rawText, setRawText] = useState<string>('');
 
+  // Tools Data
   const [dictionary, setDictionary] = useState<{term: string, meaning: string, explanation: string, phonetic: string} | null>(null);
   const [dueCardsCount, setDueCardsCount] = useState(0);
   const [showFlashcards, setShowFlashcards] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'exists'>('idle');
 
+  // Load papers on init
   useEffect(() => {
+    loadPapers();
     updateDueCount();
     const interval = setInterval(updateDueCount, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  const loadPapers = async () => {
+    try {
+        const savedPapers = await getAllPapersFromDB();
+        setPapers(savedPapers);
+        // If no papers exist, go to upload, otherwise dashboard
+        if (savedPapers.length === 0 && appState === 'dashboard') {
+            setAppState('dashboard'); // Stay on dashboard but show empty state
+        }
+    } catch (e) {
+        console.error("Failed to load papers", e);
+    }
+  };
 
   const updateDueCount = () => {
     const due = getDueFlashcards();
@@ -36,7 +60,7 @@ const App: React.FC = () => {
     setAppState('level_select');
   };
 
-  const startLearning = (level: DifficultyLevel) => {
+  const startLearning = async (level: DifficultyLevel) => {
     const textChunks = chunkTextByLevel(rawText, level);
     const initialChunks: ProcessedChunk[] = textChunks.map((t, idx) => ({
       id: idx,
@@ -44,6 +68,23 @@ const App: React.FC = () => {
       isCompleted: false
     }));
 
+    // Create new paper object
+    const newPaper: SavedPaper = {
+        id: crypto.randomUUID(),
+        fileName: fileName,
+        originalText: rawText,
+        processedChunks: initialChunks,
+        currentChunkIndex: 0,
+        createdAt: Date.now(),
+        lastOpened: Date.now()
+    };
+
+    // Save to DB
+    await savePaperToDB(newPaper);
+    
+    // Update State
+    setPapers(prev => [newPaper, ...prev]);
+    setCurrentPaperId(newPaper.id);
     setChunks(initialChunks);
     setCurrentChunkIndex(0);
     setAppState('study');
@@ -51,15 +92,45 @@ const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const openSavedPaper = async (paper: SavedPaper) => {
+    setRawText(paper.originalText);
+    setFileName(paper.fileName);
+    setChunks(paper.processedChunks);
+    setCurrentChunkIndex(paper.currentChunkIndex);
+    setCurrentPaperId(paper.id);
+    
+    // Update last opened
+    await updatePaperProgress(paper.id, paper.processedChunks, paper.currentChunkIndex);
+    loadPapers(); // Refresh list order
+    
+    setAppState('study');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDeletePaper = async (id: string) => {
+      if (confirm("Bạn có chắc chắn muốn xóa bài báo này?")) {
+          await deletePaperFromDB(id);
+          loadPapers();
+      }
+  };
+
   const handleChunkComplete = (chunkId: number) => {
-    setChunks(prev => prev.map(c => c.id === chunkId ? { ...c, isCompleted: true } : c));
+    const newChunks = chunks.map(c => c.id === chunkId ? { ...c, isCompleted: true } : c);
+    setChunks(newChunks);
+    if (currentPaperId) {
+        updatePaperProgress(currentPaperId, newChunks, currentChunkIndex);
+    }
   };
 
   const handleNext = () => {
     if (currentChunkIndex < chunks.length - 1) {
-      setCurrentChunkIndex(prev => prev + 1);
+      const nextIndex = currentChunkIndex + 1;
+      setCurrentChunkIndex(nextIndex);
       setDictionary(null);
       setSaveStatus('idle');
+      if (currentPaperId) {
+          updatePaperProgress(currentPaperId, chunks, nextIndex);
+      }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
@@ -68,6 +139,9 @@ const App: React.FC = () => {
       setCurrentChunkIndex(index);
       setDictionary(null);
       setSaveStatus('idle');
+      if (currentPaperId) {
+        updatePaperProgress(currentPaperId, chunks, index);
+      }
       window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -101,7 +175,10 @@ const App: React.FC = () => {
         <div className="w-full max-w-[98%] xl:max-w-[1900px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
             <div 
               className="flex items-center gap-2 cursor-pointer group" 
-              onClick={() => setAppState('upload')}
+              onClick={() => {
+                  setAppState('dashboard');
+                  loadPapers();
+              }}
             >
               <div className="bg-slate-900 text-white p-1.5 rounded-lg group-hover:bg-sky-600 transition-colors">
                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="m9 15 2 2 4-4"/></svg>
@@ -109,31 +186,48 @@ const App: React.FC = () => {
               <span className="font-bold text-lg tracking-tight text-slate-900">PaperLingo</span>
             </div>
 
-            {appState === 'study' && (
-              <div className="hidden md:flex items-center gap-4">
-                 <div className="px-3 py-1 bg-gray-100 rounded-full text-xs font-medium text-gray-500 max-w-[200px] truncate">
-                    {fileName}
-                 </div>
+            <div className="flex items-center gap-4">
+                 {appState === 'study' && (
+                     <div className="hidden md:block px-3 py-1 bg-gray-100 rounded-full text-xs font-medium text-gray-500 max-w-[200px] truncate">
+                        {fileName}
+                     </div>
+                 )}
                  {dueCardsCount > 0 && (
                     <button 
                       onClick={() => setShowFlashcards(true)}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 text-xs font-bold rounded-full hover:bg-red-100 transition-colors animate-pulse"
+                      className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 text-xs font-bold rounded-full hover:bg-red-100 transition-colors"
                     >
                        <span>Review</span>
                        <span className="bg-red-500 text-white w-5 h-5 flex items-center justify-center rounded-full text-[10px]">{dueCardsCount}</span>
                     </button>
                  )}
-              </div>
-            )}
+            </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="w-full max-w-[98%] xl:max-w-[1900px] mx-auto px-4 sm:px-6 py-6 md:py-8">
         
+        {/* Dashboard State */}
+        {appState === 'dashboard' && (
+            <Dashboard 
+                papers={papers}
+                onOpenPaper={openSavedPaper}
+                onDeletePaper={handleDeletePaper}
+                onNewPaper={() => setAppState('upload')}
+                onOpenFlashcards={() => setShowFlashcards(true)}
+            />
+        )}
+
         {/* Upload State */}
         {appState === 'upload' && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
+            <button 
+                onClick={() => setAppState('dashboard')} 
+                className="absolute top-0 left-4 text-slate-400 hover:text-slate-600 font-bold z-10"
+            >
+                ← Quay lại Dashboard
+            </button>
             <FileUpload onTextExtracted={handleTextExtracted} />
           </div>
         )}
@@ -167,13 +261,6 @@ const App: React.FC = () => {
                       <p className="text-sm text-slate-500">4-6 câu. Thử thách khả năng đọc hiểu sâu.</p>
                   </button>
               </div>
-
-               <button 
-                  onClick={() => setAppState('upload')}
-                  className="mt-12 text-sm text-slate-400 hover:text-slate-600 font-medium"
-               >
-                  ← Chọn file khác
-               </button>
            </div>
         )}
 
@@ -184,6 +271,9 @@ const App: React.FC = () => {
             {/* Main Area */}
             <div className="flex-1 w-full min-w-0">
                <div className="flex items-center justify-between mb-4">
+                 <button onClick={() => { setAppState('dashboard'); loadPapers(); }} className="text-sm font-bold text-slate-400 hover:text-slate-600">
+                    ← Thư viện
+                 </button>
                  <div className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
                     Đoạn {currentChunkIndex + 1} / {chunks.length}
                  </div>
@@ -275,21 +365,6 @@ const App: React.FC = () => {
                               </button>
                           )
                       })}
-                  </div>
-
-                  <div className="mt-6 pt-4 border-t border-gray-100">
-                    <button 
-                        onClick={() => setShowFlashcards(true)}
-                        className="w-full text-left flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
-                    >
-                         <div className="bg-orange-100 text-orange-600 p-2 rounded-lg group-hover:bg-orange-200 transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-                         </div>
-                         <div>
-                             <div className="text-sm font-bold text-slate-700">Flashcards</div>
-                             <div className="text-xs text-slate-400">{getDueFlashcards().length} cần ôn tập</div>
-                         </div>
-                    </button>
                   </div>
                </div>
             </div>

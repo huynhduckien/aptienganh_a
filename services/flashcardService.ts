@@ -1,10 +1,16 @@
+
 import { Flashcard } from "../types";
 
 const STORAGE_KEY = 'paperlingo_flashcards';
 
 export const getFlashcards = (): Flashcard[] => {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  return stored ? JSON.parse(stored) : [];
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (e) {
+    console.warn("Failed to load flashcards", e);
+    return [];
+  }
 };
 
 export const saveFlashcard = (card: Omit<Flashcard, 'id' | 'level' | 'nextReview' | 'createdAt'>): boolean => {
@@ -44,24 +50,16 @@ export const updateCardStatus = (cardId: string, remembered: boolean) => {
   let newLevel = card.level;
 
   if (remembered) {
-    // Spaced Repetition Logic (Exponential backoff)
-    // Level 0 -> 10 mins (Testing phase) -> 1 day
-    // Level 1 -> 1 day
-    // Level 2 -> 3 days
-    // Level 3 -> 7 days
-    // Level 4 -> 14 days
-    // Level 5 -> 30 days
+    // Spaced Repetition Logic
     newLevel = card.level + 1;
-
     switch (newLevel) {
-      case 1: nextReview += 24 * 60 * 60 * 1000; break; // 1 day
-      case 2: nextReview += 3 * 24 * 60 * 60 * 1000; break; // 3 days
-      case 3: nextReview += 7 * 24 * 60 * 60 * 1000; break; // 7 days
-      case 4: nextReview += 14 * 24 * 60 * 60 * 1000; break; // 14 days
-      default: nextReview += 30 * 24 * 60 * 60 * 1000; break; // 30 days
+      case 1: nextReview += 24 * 60 * 60 * 1000; break; 
+      case 2: nextReview += 3 * 24 * 60 * 60 * 1000; break; 
+      case 3: nextReview += 7 * 24 * 60 * 60 * 1000; break; 
+      case 4: nextReview += 14 * 24 * 60 * 60 * 1000; break; 
+      default: nextReview += 30 * 24 * 60 * 60 * 1000; break; 
     }
   } else {
-    // Forgot: Reset to level 0, review again in 10 minutes
     newLevel = 0;
     nextReview += 10 * 60 * 1000; 
   }
