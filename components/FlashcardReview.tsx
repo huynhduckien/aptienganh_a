@@ -130,51 +130,87 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       )
   };
 
-  // NEW: Stacked Bar Chart for Forecast (Anki Style)
+  // UPDATED: Stacked Bar Chart for Forecast (Anki Style with Fixed X-Axis)
   const StackedForecastChart = ({ young, mature, labels }: { young: number[], mature: number[], labels: string[] }) => {
-      // Calculate local max for the current view slice to scale bars properly
+      // Calculate local max
       let localMax = 0;
       for (let i = 0; i < young.length; i++) {
           const total = young[i] + mature[i];
           if (total > localMax) localMax = total;
       }
-      const safeMax = Math.max(localMax, 1);
+      const safeMax = Math.max(localMax, 5); 
       
-      // Dynamic label interval based on data length
-      const labelInterval = Math.ceil(young.length / 7);
+      // Determine ticks for X-Axis (show exactly 6 ticks evenly distributed)
+      const tickCount = 6;
+      const ticks = [];
+      for (let i = 0; i < tickCount; i++) {
+          const index = Math.floor((i / (tickCount - 1)) * (young.length - 1));
+          ticks.push({
+              label: labels[index] || '',
+              left: `${(i / (tickCount - 1)) * 100}%`
+          });
+      }
 
       return (
-        <div className="flex items-end justify-between h-32 gap-0.5 md:gap-px pt-4 w-full overflow-hidden relative">
-            {/* Y-Axis Grid lines (Optional, simple) */}
-            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-10">
-                <div className="border-t border-slate-900 w-full"></div>
-                <div className="border-t border-slate-900 w-full"></div>
-                <div className="border-t border-slate-900 w-full"></div>
+        <div className="relative w-full h-48 pt-6 pb-8 pl-10 pr-4 box-border">
+            {/* Y-Axis Labels (Left) */}
+            <div className="absolute left-0 top-6 bottom-8 w-8 flex flex-col justify-between text-[10px] text-slate-400 text-right pr-2 font-mono">
+                <span>{safeMax}</span>
+                <span>{Math.round(safeMax / 2)}</span>
+                <span>0</span>
             </div>
 
-            {young.map((yVal, idx) => {
-                 const mVal = mature[idx];
-                 const total = yVal + mVal;
-                 const heightPercent = (total / safeMax) * 100;
-                 
-                 const youngHeightPercent = total > 0 ? (yVal / total) * 100 : 0;
-                 const matureHeightPercent = total > 0 ? (mVal / total) * 100 : 0;
+            {/* Grid lines (Background) */}
+            <div className="absolute left-10 right-4 top-6 bottom-8 flex flex-col justify-between pointer-events-none z-0">
+                <div className="border-t border-slate-100 w-full h-0"></div>
+                <div className="border-t border-slate-100 w-full h-0 border-dashed"></div>
+                <div className="border-b border-slate-300 w-full h-0"></div>
+            </div>
 
-                 return (
-                    <div key={idx} className="flex-1 flex flex-col justify-end items-center group relative min-w-[1px] h-full">
-                        <div className="w-full flex flex-col-reverse rounded-t-sm overflow-hidden hover:brightness-90 transition-all" style={{ height: `${heightPercent}%` }}>
-                            {/* Mature (Bottom) */}
-                            <div className="w-full bg-emerald-700" style={{ height: `${matureHeightPercent}%` }} title={`Mature: ${mVal}`}></div>
-                            {/* Young (Top) */}
-                            <div className="w-full bg-lime-400" style={{ height: `${youngHeightPercent}%` }} title={`Young: ${yVal}`}></div>
+            {/* Bars Container */}
+            <div className="flex items-end justify-between h-full w-full relative z-10 gap-[1px]">
+                {young.map((yVal, idx) => {
+                    const mVal = mature[idx];
+                    const total = yVal + mVal;
+                    const heightPercent = (total / safeMax) * 100;
+                    
+                    const youngHeightPercent = total > 0 ? (yVal / total) * 100 : 0;
+                    const matureHeightPercent = total > 0 ? (mVal / total) * 100 : 0;
+
+                    return (
+                        <div key={idx} className="flex-1 flex flex-col justify-end items-center group relative min-w-[2px] h-full">
+                            {/* Hover Tooltip */}
+                            <div className="absolute bottom-full mb-1 opacity-0 group-hover:opacity-100 bg-slate-800 text-white text-[10px] px-2 py-1 rounded pointer-events-none z-20 whitespace-nowrap transition-opacity">
+                                Day {labels[idx]}: {total} (Y:{yVal}, M:{mVal})
+                            </div>
+
+                            {/* The Bar */}
+                            <div 
+                                className="w-full flex flex-col-reverse rounded-t-[1px] overflow-hidden hover:brightness-95 transition-all" 
+                                style={{ height: `${heightPercent}%` }}
+                            >
+                                {/* Mature (Bottom - Dark Green - Anki Style) */}
+                                <div className="w-full bg-[#15803d]" style={{ height: `${matureHeightPercent}%` }}></div>
+                                {/* Young (Top - Light Green - Anki Style) */}
+                                <div className="w-full bg-[#a3e635]" style={{ height: `${youngHeightPercent}%` }}></div>
+                            </div>
                         </div>
-                        
-                        {(idx % labelInterval === 0) && (
-                            <span className="text-[8px] md:text-[9px] text-slate-400 mt-1 absolute top-full whitespace-nowrap">{labels[idx]}</span>
-                        )}
+                    )
+                })}
+            </div>
+
+            {/* X-Axis Labels (Absolute Positioning) */}
+            <div className="absolute left-10 right-4 bottom-0 h-6">
+                {ticks.map((tick, i) => (
+                    <div 
+                        key={i} 
+                        className="absolute top-0 text-[10px] text-slate-500 transform -translate-x-1/2 text-center"
+                        style={{ left: tick.left }}
+                    >
+                        {tick.label}
                     </div>
-                 )
-            })}
+                ))}
+            </div>
         </div>
       );
   };
@@ -192,12 +228,12 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
           #3b82f6 0deg ${pNew}deg, 
           #f97316 ${pNew}deg ${pNew + pLearning}deg,
           #a3e635 ${pNew + pLearning}deg ${pNew + pLearning + pYoung}deg,
-          #047857 ${pNew + pLearning + pYoung}deg 360deg
+          #15803d ${pNew + pLearning + pYoung}deg 360deg
       )`;
 
       return (
           <div className="flex flex-col md:flex-row items-center gap-6">
-               <div className="relative w-32 h-32 shrink-0 rounded-full" style={{ background: gradient }}>
+               <div className="relative w-32 h-32 shrink-0 rounded-full shadow-inner" style={{ background: gradient }}>
                    <div className="absolute inset-8 bg-white rounded-full flex items-center justify-center">
                        <div className="text-center">
                            <div className="text-xs text-slate-400 font-bold">Total</div>
@@ -205,11 +241,11 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                        </div>
                    </div>
                </div>
-               <div className="grid grid-cols-2 md:grid-cols-1 gap-x-4 gap-y-1 text-xs font-medium">
+               <div className="grid grid-cols-2 md:grid-cols-1 gap-x-4 gap-y-2 text-xs font-medium">
                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-sm"></div> New: {counts.new}</div>
                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-orange-500 rounded-sm"></div> Learning: {counts.learning}</div>
-                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-lime-400 rounded-sm"></div> Young: {counts.young}</div>
-                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-emerald-700 rounded-sm"></div> Mature: {counts.mature}</div>
+                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-[#a3e635] rounded-sm"></div> Young: {counts.young}</div>
+                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-[#15803d] rounded-sm"></div> Mature: {counts.mature}</div>
                </div>
           </div>
       )
@@ -245,22 +281,26 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                              <div className="flex-1 flex flex-col justify-center items-center text-center space-y-4">
                                  {queue.length > 0 ? (
                                      <>
-                                        <p className="text-slate-500 text-sm">Bạn có <strong className="text-slate-900">{queue.length}</strong> thẻ cần ôn tập ngay.</p>
+                                        <div className="text-4xl font-black text-slate-800">{queue.length}</div>
+                                        <p className="text-slate-500 text-sm">thẻ cần ôn tập.</p>
                                         <button 
                                             onClick={() => setView('review')}
-                                            className="w-full md:w-auto px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 transition-all active:scale-95"
+                                            className="w-full md:w-auto px-10 py-3 bg-slate-900 text-white font-bold rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
                                         >
-                                            Bắt đầu học ngay
+                                            Bắt đầu học
                                         </button>
                                      </>
                                  ) : (
-                                     <p className="text-slate-400">Không có thẻ nào cần học hôm nay.</p>
+                                     <div className="py-8">
+                                         <div className="text-4xl mb-2">🎉</div>
+                                         <p className="text-slate-800 font-bold">Đã hoàn thành!</p>
+                                         <p className="text-slate-400 text-sm">Không còn thẻ nào cho hôm nay.</p>
+                                     </div>
                                  )}
                                  
                                  <div className="mt-4 pt-4 border-t w-full text-xs text-slate-500 flex justify-between px-2">
-                                     <span>Đã học: {stats.today.studied}</span>
-                                     <span>Học lại: {stats.today.againCount}</span>
-                                     <span>Thuộc: {stats.today.matureCount}</span>
+                                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-300"></span> Đã học: {stats.today.studied}</span>
+                                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400"></span> Lại: {stats.today.againCount}</span>
                                  </div>
                              </div>
                          </div>
@@ -269,18 +309,16 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
                              <div className="flex justify-between items-center mb-4 border-b pb-2">
                                 <h3 className="text-lg font-semibold text-slate-800">Dự báo</h3>
-                                <div className="space-x-2 text-[10px]">
-                                    <label className="cursor-pointer"><input type="radio" checked={forecastRange==='1m'} onChange={()=>setForecastRange('1m')} className="mr-1"/>1 tháng</label>
-                                    <label className="cursor-pointer"><input type="radio" checked={forecastRange==='3m'} onChange={()=>setForecastRange('3m')} className="mr-1"/>3 tháng</label>
-                                    <label className="cursor-pointer"><input type="radio" checked={forecastRange==='1y'} onChange={()=>setForecastRange('1y')} className="mr-1"/>1 năm</label>
+                                <div className="space-x-1 text-[10px] bg-slate-100 p-1 rounded-lg">
+                                    <button onClick={()=>setForecastRange('1m')} className={`px-2 py-1 rounded ${forecastRange==='1m'?'bg-white shadow text-indigo-600':'text-slate-500'}`}>1 tháng</button>
+                                    <button onClick={()=>setForecastRange('3m')} className={`px-2 py-1 rounded ${forecastRange==='3m'?'bg-white shadow text-indigo-600':'text-slate-500'}`}>3 tháng</button>
+                                    <button onClick={()=>setForecastRange('1y')} className={`px-2 py-1 rounded ${forecastRange==='1y'?'bg-white shadow text-indigo-600':'text-slate-500'}`}>1 năm</button>
                                 </div>
                              </div>
-                             <div className="flex-1 w-full overflow-hidden relative">
-                                 <div className="text-center text-xs text-slate-500 mb-2">Số thẻ ôn tập đến hạn trong tương lai.</div>
-                                 
-                                 <div className="absolute top-0 right-0 flex gap-3 text-[10px]">
-                                     <div className="flex items-center gap-1"><div className="w-2 h-2 bg-lime-400"></div>Young</div>
-                                     <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-700"></div>Mature</div>
+                             <div className="flex-1 w-full relative">
+                                 <div className="flex justify-end gap-3 text-[10px] mb-2 font-medium">
+                                     <div className="flex items-center gap-1"><div className="w-2 h-2 bg-[#a3e635] border border-slate-200"></div>Young</div>
+                                     <div className="flex items-center gap-1"><div className="w-2 h-2 bg-[#15803d]"></div>Mature</div>
                                  </div>
 
                                  <StackedForecastChart 
@@ -293,7 +331,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
 
                          {/* CARD: SỐ LƯỢNG THẺ */}
                          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
-                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Số lượng thẻ</h3>
+                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Phân loại thẻ</h3>
                              <div className="flex-1 flex justify-center items-center">
                                  <DonutChart counts={stats.counts} />
                              </div>
@@ -301,21 +339,24 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
 
                          {/* CARD: KHOẢNG CÁCH */}
                          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
-                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Khoảng cách</h3>
+                             <h3 className="text-lg font-semibold text-slate-800 mb-4 border-b pb-2">Khoảng cách ôn tập</h3>
                              <div className="flex-1 w-full overflow-hidden">
-                                 <div className="text-center text-xs text-slate-500 mb-2">Thời gian giãn cách</div>
+                                 <div className="text-center text-xs text-slate-400 mb-2 italic">Phân bố thời gian lặp lại</div>
                                  <SimpleBarChart 
                                     data={stats.intervals.data} 
                                     labels={stats.intervals.labels}
-                                    color="bg-slate-400"
+                                    color="bg-slate-300"
                                  />
                              </div>
                          </div>
 
                          {/* CARD: SETTINGS & IMPORT */}
                          <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-between items-center">
-                                <span className="text-sm font-bold text-slate-600">Giới hạn học/ngày</span>
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xl">🎯</span>
+                                    <span className="text-sm font-bold text-slate-700">Mục tiêu hằng ngày</span>
+                                </div>
                                 <div className="flex items-center gap-2">
                                     {isEditingLimit ? (
                                         <>
@@ -323,47 +364,47 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                                                 type="number" 
                                                 value={tempLimit} 
                                                 onChange={(e) => setTempLimit(e.target.value)}
-                                                className="w-16 px-2 py-1 border rounded text-center"
+                                                className="w-16 px-2 py-1 border rounded text-center font-bold"
                                             />
-                                            <button onClick={handleSaveLimit} className="text-green-600 font-bold text-sm bg-green-100 px-2 py-1 rounded">Lưu</button>
+                                            <button onClick={handleSaveLimit} className="text-white font-bold text-xs bg-green-500 px-3 py-1.5 rounded shadow">Lưu</button>
                                         </>
                                     ) : (
-                                        <button onClick={() => setIsEditingLimit(true)} className="text-indigo-600 font-bold hover:bg-indigo-50 px-2 py-1 rounded">
-                                            {stats.today.limit} thẻ ✏️
+                                        <button onClick={() => setIsEditingLimit(true)} className="text-indigo-600 font-bold hover:bg-indigo-50 px-3 py-1 rounded border border-indigo-100">
+                                            {stats.today.limit} thẻ / ngày ✏️
                                         </button>
                                     )}
                                 </div>
                             </div>
                             
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                                 {!showImport ? (
                                     <button 
                                         onClick={() => setShowImport(true)}
-                                        className="w-full flex items-center justify-center gap-2 text-indigo-600 font-bold text-sm hover:underline"
+                                        className="w-full flex items-center justify-center gap-2 text-slate-600 font-bold text-sm hover:text-indigo-600"
                                     >
-                                        📥 Import Google Sheet
+                                        <span className="text-lg">📥</span> Nhập từ Google Sheet
                                     </button>
                                 ) : (
                                     <div className="space-y-2">
                                         <input 
                                             type="text"
-                                            placeholder="Link Google Sheet..."
+                                            placeholder="Dán link Google Sheet vào đây..."
                                             value={importUrl}
                                             onChange={(e) => setImportUrl(e.target.value)}
-                                            className="w-full px-3 py-2 text-xs border rounded"
+                                            className="w-full px-3 py-2 text-xs border border-indigo-200 rounded focus:ring-2 focus:ring-indigo-500 outline-none"
                                         />
                                         <div className="flex gap-2">
                                             <button 
                                                 onClick={handleImportSheet}
                                                 disabled={importStatus === 'loading'}
-                                                className="flex-1 px-3 py-2 bg-indigo-600 text-white text-xs rounded font-bold disabled:opacity-50"
+                                                className="flex-1 px-3 py-2 bg-indigo-600 text-white text-xs rounded font-bold disabled:opacity-50 shadow"
                                             >
-                                                {importStatus === 'loading' ? '...' : 'Import'}
+                                                {importStatus === 'loading' ? 'Đang xử lý...' : 'Nhập ngay'}
                                             </button>
-                                            <button onClick={() => setShowImport(false)} className="px-3 py-2 text-xs text-slate-500 bg-white border rounded">Hủy</button>
+                                            <button onClick={() => setShowImport(false)} className="px-3 py-2 text-xs text-slate-500 bg-gray-100 rounded hover:bg-gray-200">Hủy</button>
                                         </div>
                                         {importMsg && (
-                                            <div className={`text-xs p-2 rounded ${importStatus === 'error' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                                            <div className={`text-xs p-2 rounded font-medium ${importStatus === 'error' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
                                                 {importMsg}
                                             </div>
                                         )}

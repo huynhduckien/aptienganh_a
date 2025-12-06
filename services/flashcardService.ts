@@ -345,13 +345,14 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
 
         let diffDays = 0;
         if (c.nextReview <= now) {
+            // Overdue cards go to "Today" (Day 0) to represent backlog
             diffDays = 0;
         } else {
             const diffTime = c.nextReview - now;
             diffDays = Math.ceil(diffTime / ONE_DAY);
         }
 
-        if (diffDays < FORECAST_DAYS) {
+        if (diffDays < FORECAST_DAYS && diffDays >= 0) {
             // Anki Definition: Mature = Interval >= 21 days
             if (c.interval >= 21) {
                 forecastMature[diffDays]++;
