@@ -48,6 +48,13 @@ export interface Flashcard {
   repetitions: number; // Consecutive correct reviews
 }
 
+export interface StudentAccount {
+    key: string;
+    name: string;
+    createdAt: number;
+    lastActive?: number;
+}
+
 declare global {
   const pdfjsLib: any;
 }

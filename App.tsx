@@ -3,11 +3,13 @@ import React, { useState, useEffect } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { LessonView } from './components/LessonView';
 import { Dashboard } from './components/Dashboard';
+import { AdminPanel } from './components/AdminPanel'; // Import AdminPanel
 import { chunkTextByLevel, DifficultyLevel } from './services/pdfService';
 import { ProcessedChunk, SavedPaper, Flashcard } from './types';
-import { saveFlashcard, getDueFlashcards, getFlashcards } from './services/flashcardService';
+import { saveFlashcard, getDueFlashcards, getFlashcards, setSyncKeyAndSync } from './services/flashcardService';
 import { FlashcardReview } from './components/FlashcardReview';
 import { savePaperToDB, getAllPapersFromDB, updatePaperProgress, deletePaperFromDB, generateId } from './services/db';
+import { verifyStudentKey } from './services/firebaseService';
 
 type AppState = 'dashboard' | 'upload' | 'level_select' | 'study';
 
@@ -26,17 +28,57 @@ const App: React.FC = () => {
   const [dictionary, setDictionary] = useState<{term: string, meaning: string, explanation: string, phonetic: string} | null>(null);
   const [dueCards, setDueCards] = useState<Flashcard[]>([]);
   const [showFlashcards, setShowFlashcards] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false); // State for Admin Panel
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'exists'>('idle');
+  
+  // Sync Data
+  const [syncKey, setSyncKey] = useState<string | null>(null);
 
   // Load papers and flashcards on init
   useEffect(() => {
+    // 1. Check local storage for sync key
+    const storedKey = localStorage.getItem('paperlingo_sync_key');
+    if (storedKey) {
+        setSyncKey(storedKey);
+        setSyncKeyAndSync(storedKey).then(() => {
+            updateDueCount();
+        });
+    }
+
     loadPapers();
-    // Trigger Flashcard Sync (will fetch from Firebase if needed)
-    getFlashcards().then(() => updateDueCount());
+    
+    // Fallback local load if no sync key yet
+    if (!storedKey) {
+        getFlashcards().then(() => updateDueCount());
+    }
     
     const interval = setInterval(updateDueCount, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  // Handle Sync Key Change
+  const handleSetSyncKey = async (key: string) => {
+      if (!key) {
+          // Logout logic
+          localStorage.removeItem('paperlingo_sync_key');
+          setSyncKey(null);
+          window.location.reload(); // Refresh to clear memory state
+          return;
+      }
+
+      // Verify key exists (optional security check)
+      const isValid = await verifyStudentKey(key);
+      if (!isValid) {
+          alert("Mã học viên không hợp lệ hoặc không tồn tại!");
+          return;
+      }
+
+      setSyncKey(key);
+      localStorage.setItem('paperlingo_sync_key', key);
+      await setSyncKeyAndSync(key);
+      await updateDueCount();
+      alert(`Đã kích hoạt tài khoản: ${isValid.name}`);
+  };
 
   const loadPapers = async () => {
     try {
@@ -103,6 +145,7 @@ const App: React.FC = () => {
 
   const handleDeletePaper = async (id: string) => {
       if (window.confirm("Bạn có chắc chắn muốn xóa bài báo này?")) {
+          // Optimistic UI update
           setPapers(prev => prev.filter(p => p.id !== id));
 
           try {
@@ -185,6 +228,11 @@ const App: React.FC = () => {
                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="m9 15 2 2 4-4"/></svg>
               </div>
               <span className="font-bold text-lg tracking-tight text-slate-900">PaperLingo</span>
+              {syncKey && (
+                  <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs font-mono hidden sm:block">
+                      {syncKey}
+                  </span>
+              )}
             </div>
 
             <div className="flex items-center gap-4">
@@ -215,6 +263,9 @@ const App: React.FC = () => {
                 onDeletePaper={handleDeletePaper}
                 onNewPaper={() => setAppState('upload')}
                 onOpenFlashcards={() => setShowFlashcards(true)}
+                syncKey={syncKey}
+                onSetSyncKey={handleSetSyncKey}
+                onOpenAdmin={() => setShowAdmin(true)}
             />
         )}
 
@@ -385,6 +436,10 @@ const App: React.FC = () => {
             onClose={() => setShowFlashcards(false)}
             onUpdate={updateDueCount}
         />
+      )}
+
+      {showAdmin && (
+          <AdminPanel onClose={() => setShowAdmin(false)} />
       )}
     </div>
   );

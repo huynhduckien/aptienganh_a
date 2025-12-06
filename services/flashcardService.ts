@@ -1,7 +1,7 @@
 
 import { Flashcard, ReviewRating } from "../types";
 import { getFlashcardsFromDB, saveFlashcardToDB, generateId } from "./db";
-import { fetchCloudFlashcards, saveCloudFlashcard } from "./firebaseService";
+import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey } from "./firebaseService";
 
 let hasSynced = false;
 
@@ -17,6 +17,12 @@ export interface FlashcardStats {
     review: number;
     mastered: number;
 }
+
+export const setSyncKeyAndSync = async (key: string): Promise<void> => {
+    setFirebaseSyncKey(key);
+    hasSynced = false;
+    await getFlashcards();
+};
 
 export const getFlashcards = async (): Promise<Flashcard[]> => {
   try {
