@@ -39,9 +39,13 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   }, [dueCards]);
 
   const refreshStats = async () => {
-      const s = await getAnkiStats();
-      setStats(s);
-      if(s) setTempLimit(s.today.limit.toString());
+      try {
+          const s = await getAnkiStats();
+          setStats(s);
+          if(s) setTempLimit(s.today.limit.toString());
+      } catch (e) {
+          console.error("Failed to refresh stats", e);
+      }
   };
 
   const playAudio = (text: string) => {
