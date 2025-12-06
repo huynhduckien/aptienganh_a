@@ -45,8 +45,11 @@ export interface Flashcard {
   
   // Advanced SRS
   easeFactor: number; // Default 2.5
-  interval: number; // Days
+  interval: number; // Days (if >= 1) or Minutes (if < 1)
   repetitions: number; // Consecutive correct reviews
+  
+  // NEW: Anki Learning Steps tracker
+  step?: number; // 0 = 1st step (1m), 1 = 2nd step (10m), etc.
 }
 
 // NEW: Log lịch sử ôn tập để vẽ biểu đồ

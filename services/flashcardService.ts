@@ -10,6 +10,12 @@ let hasSynced = false;
 const ONE_MINUTE = 60 * 1000;
 const ONE_DAY = 24 * 60 * 60 * 1000;
 
+// ANKI CONSTANTS
+const LEARNING_STEPS = [1, 10]; // Minutes
+const GRADUATING_INTERVAL = 1; // Day
+const EASY_INTERVAL = 4; // Days
+const STARTING_EASE = 2.5;
+
 export interface FlashcardStats {
     total: number;
     due: number;
@@ -93,9 +99,10 @@ export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'next
     level: 0, // 0 = New
     nextReview: Date.now(),
     createdAt: Date.now(),
-    easeFactor: 2.5,
+    easeFactor: STARTING_EASE,
     interval: 0,
-    repetitions: 0
+    repetitions: 0,
+    step: 0
   };
 
   await saveFlashcardToDB(newCard);
@@ -307,8 +314,6 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
     };
 
     // 2. COUNTS (Pie Chart)
-    // Classification: New (0 reps), Young (< 21d interval), Mature (>= 21d interval)
-    // We can also split Young into "Learning" (reps > 0 but low)
     const counts = {
         new: 0,
         learning: 0,
@@ -319,9 +324,9 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
     };
 
     cards.forEach(c => {
-        if (c.repetitions === 0) {
+        if (c.interval === 0 && c.repetitions === 0) {
             counts.new++;
-        } else if (c.interval < 1) {
+        } else if (c.interval < 1) { // Interval < 1 day = Learning
             counts.learning++;
         } else if (c.interval < 21) {
             counts.young++;
@@ -342,13 +347,11 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
                 forecastMap[diffDays]++;
             }
         } else {
-             // Overdue counts as today/tomorrow load essentially
              forecastMap[0]++;
         }
     });
 
     // 4. INTERVALS (Distribution)
-    // Buckets: 0-1d, 2-7d, 8-30d, 1-3m, 3-6m, 6m-1y, 1y+
     const intervalBuckets = [0, 0, 0, 0, 0, 0, 0];
     const intervalLabels = ['0-1d', '2-7d', '8-30d', '1-3m', '3-6m', '6m-1y', '>1y'];
     
@@ -371,45 +374,98 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
     };
 };
 
-// --- SM-2 ALGORITHM ---
-export const calculateNextReview = (card: Flashcard, rating: ReviewRating): { nextReview: number, interval: number, easeFactor: number, repetitions: number } => {
-    let { interval, easeFactor, repetitions } = card;
+// --- SM-2 ALGORITHM WITH ANKI LEARNING STEPS ---
+
+// Helper để tính toán mô phỏng (dùng cho việc hiển thị nhãn nút bấm)
+export const getIntervalPreviewText = (card: Flashcard, rating: ReviewRating): string => {
+    const { interval } = calculateNextReview(card, rating, true);
+    
+    if (interval < 1) {
+        // Minutes
+        const mins = Math.round(interval * 24 * 60);
+        return mins < 1 ? "< 1m" : `${mins}m`;
+    } else {
+        // Days
+        const days = Math.round(interval);
+        if (days >= 365) return `${(days/365).toFixed(1)}y`;
+        return `${days}d`;
+    }
+};
+
+// Hàm tính toán cốt lõi
+// isPreview = true: Chỉ tính toán trả về, không làm thay đổi trạng thái
+export const calculateNextReview = (
+    card: Flashcard, 
+    rating: ReviewRating, 
+    isPreview: boolean = false
+): { nextReview: number, interval: number, easeFactor: number, repetitions: number, step: number } => {
+    
+    let { interval, easeFactor, repetitions, step = 0 } = card;
     const now = Date.now();
 
-    if (rating === 'again') {
-        repetitions = 0;
-        interval = 0; 
-        return { 
-            nextReview: now + ONE_MINUTE, 
-            interval: 0, 
-            easeFactor: Math.max(1.3, easeFactor - 0.2), 
-            repetitions: 0 
-        };
-    }
+    // Determine State: Learning (< 1 day) vs Review (>= 1 day)
+    const isLearning = interval < 1;
 
-    if (interval === 0) {
-        interval = 1; 
-    } else if (interval === 1) {
-        interval = 6; 
+    if (isLearning) {
+        // --- LEARNING PHASE ---
+        // Steps: 1m (0), 10m (1)
+        
+        if (rating === 'again') {
+            step = 0;
+            interval = LEARNING_STEPS[0] / (24 * 60); // 1 minute in days
+        } else if (rating === 'hard') {
+            // Anki behavior: Average of steps or 1.5x previous? 
+            // Prompt request: "Khoảng 6 phút (trung bình)"
+            // (1 + 10) / 2 = 5.5 -> ~6m
+            interval = 6 / (24 * 60); 
+            // Step stays same
+        } else if (rating === 'good') {
+            if (step < LEARNING_STEPS.length - 1) {
+                // Move to next step
+                step++;
+                interval = LEARNING_STEPS[step] / (24 * 60); // 10 minutes in days
+            } else {
+                // Graduate
+                interval = GRADUATING_INTERVAL; // 1 day
+                step = 0; // Reset step just in case
+            }
+        } else if (rating === 'easy') {
+            // Graduate Immediately
+            interval = EASY_INTERVAL; // 4 days
+            step = 0;
+        }
+
     } else {
-        interval = Math.round(interval * easeFactor);
+        // --- REVIEW PHASE ---
+        
+        if (rating === 'again') {
+            // Lapse: Forgot the card
+            step = 0;
+            interval = LEARNING_STEPS[1] / (24 * 60); // 10 minutes (Relearning step)
+            easeFactor = Math.max(1.3, easeFactor - 0.2);
+            repetitions = 0;
+        } else if (rating === 'hard') {
+            interval = interval * 1.2;
+            easeFactor = Math.max(1.3, easeFactor - 0.15);
+        } else if (rating === 'good') {
+            interval = interval * easeFactor;
+        } else if (rating === 'easy') {
+            interval = interval * easeFactor * 1.3;
+            easeFactor += 0.15;
+        }
     }
 
-    if (rating === 'hard') {
-        interval = Math.max(1, Math.round(interval * 0.5));
-        easeFactor = Math.max(1.3, easeFactor - 0.15);
-    } else if (rating === 'easy') {
-        interval = Math.round(interval * 1.3); 
-        easeFactor += 0.15;
+    // Update repetitions logic if needed (usually increment on Good/Easy)
+    if (!isPreview) {
+        if (rating !== 'again') repetitions++;
     }
-
-    repetitions++;
 
     return {
         nextReview: now + (interval * ONE_DAY),
         interval,
         easeFactor,
-        repetitions
+        repetitions,
+        step
     };
 };
 
@@ -419,7 +475,7 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
   if (index === -1) return;
 
   const card = cards[index];
-  const { nextReview, interval, easeFactor, repetitions } = calculateNextReview(card, rating);
+  const { nextReview, interval, easeFactor, repetitions, step } = calculateNextReview(card, rating);
 
   const updatedCard: Flashcard = { 
       ...card, 
@@ -427,7 +483,8 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
       interval, 
       easeFactor, 
       repetitions,
-      level: interval > 21 ? 2 : 1 
+      step,
+      level: interval >= 21 ? 2 : 1 
   };
   
   await saveFlashcardToDB(updatedCard);

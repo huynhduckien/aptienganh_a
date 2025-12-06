@@ -1,7 +1,8 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { Flashcard, ReviewRating, AnkiStats } from '../types';
-import { updateCardStatus, getAnkiStats, setDailyLimit, importFlashcardsFromSheet } from '../services/flashcardService';
+import { updateCardStatus, getAnkiStats, setDailyLimit, importFlashcardsFromSheet, getIntervalPreviewText } from '../services/flashcardService';
 
 interface FlashcardReviewProps {
   cards: Flashcard[]; // These are the DUE cards
@@ -106,33 +107,6 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       }
   };
 
-  const formatInterval = (days: number): string => {
-      if (days === 0) return "< 1m";
-      if (days < 1) return "1d"; 
-      if (days < 30) return `${days}d`;
-      if (days < 365) return `${Math.round(days/30)}mo`;
-      return `${(days/365).toFixed(1)}y`;
-  };
-
-  const getIntervalPreview = (rating: ReviewRating) => {
-      const card = queue[currentIndex];
-      if (!card) return "";
-      
-      let interval = card.interval;
-      const ease = card.easeFactor || 2.5;
-
-      if (rating === 'again') return "< 1m";
-      
-      if (interval === 0) interval = 1;
-      else if (interval === 1) interval = 6;
-      else interval = Math.round(interval * ease);
-
-      if (rating === 'hard') interval = Math.max(1, Math.round(interval * 0.5));
-      if (rating === 'easy') interval = Math.round(interval * 1.3);
-      
-      return formatInterval(interval);
-  };
-
   // --- CHART COMPONENTS (CSS ONLY) ---
 
   const SimpleBarChart = ({ data, labels, color = 'bg-slate-300' }: { data: number[], labels: string[], color?: string }) => {
@@ -140,9 +114,6 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       return (
           <div className="flex items-end justify-between h-32 gap-0.5 md:gap-1 pt-4 w-full overflow-hidden">
               {data.map((val, idx) => {
-                   // Responsive logic: Show fewer bars on mobile if dense
-                   // if (window.innerWidth < 640 && data.length > 15 && idx % 2 !== 0) return null;
-                   
                    return (
                       <div key={idx} className="flex-1 flex flex-col items-center group relative min-w-[2px]">
                           <div 
@@ -440,19 +411,19 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                 // Responsive Grid: 2x2 on Mobile, 4x1 on Desktop
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
                     <button onClick={() => handleRate('again')} className="bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-700 py-3 md:py-4 rounded-xl flex flex-col items-center border border-rose-200 transition-colors">
-                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreview('again')}</span>
+                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreviewText(currentCard, 'again')}</span>
                         <span className="font-bold text-lg">Again</span>
                     </button>
                     <button onClick={() => handleRate('hard')} className="bg-orange-50 hover:bg-orange-100 active:bg-orange-200 text-orange-700 py-3 md:py-4 rounded-xl flex flex-col items-center border border-orange-200 transition-colors">
-                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreview('hard')}</span>
+                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreviewText(currentCard, 'hard')}</span>
                         <span className="font-bold text-lg">Hard</span>
                     </button>
                     <button onClick={() => handleRate('good')} className="bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-700 py-3 md:py-4 rounded-xl flex flex-col items-center border border-emerald-200 transition-colors">
-                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreview('good')}</span>
+                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreviewText(currentCard, 'good')}</span>
                         <span className="font-bold text-lg">Good</span>
                     </button>
                     <button onClick={() => handleRate('easy')} className="bg-sky-50 hover:bg-sky-100 active:bg-sky-200 text-sky-700 py-3 md:py-4 rounded-xl flex flex-col items-center border border-sky-200 transition-colors">
-                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreview('easy')}</span>
+                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreviewText(currentCard, 'easy')}</span>
                         <span className="font-bold text-lg">Easy</span>
                     </button>
                 </div>
