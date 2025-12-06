@@ -538,11 +538,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                  <h2 className="text-4xl md:text-6xl font-serif font-bold text-slate-900 mb-4 break-words leading-tight">{currentCard.term}</h2>
                  
                  <div className="flex items-center justify-center gap-3">
-                     {currentCard.phonetic && (
-                        <span className="text-slate-500 font-mono text-lg md:text-2xl bg-slate-50 px-3 py-1 rounded-lg">
-                            /{currentCard.phonetic}/
-                        </span>
-                     )}
+                     {/* REMOVED PHONETIC FROM FRONT */}
                      <button 
                             onClick={(e) => { e.stopPropagation(); playAudio(currentCard.term); }}
                             className="text-indigo-500 hover:text-indigo-700 p-2 bg-indigo-50 rounded-full hover:bg-indigo-100 transition-colors"
@@ -554,6 +550,16 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
 
             {isFlipped ? (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-lg border-t pt-6 md:pt-8 border-slate-100">
+                     
+                     {/* MOVED PHONETIC TO BACK */}
+                     {currentCard.phonetic && (
+                        <div className="mb-6 flex justify-center">
+                            <span className="text-slate-500 font-mono text-xl bg-slate-50 px-4 py-1.5 rounded-lg border border-slate-100 tracking-wide">
+                                /{currentCard.phonetic}/
+                            </span>
+                        </div>
+                     )}
+
                      <div className="mb-6">
                         <span className="text-xs font-bold text-green-600 uppercase tracking-widest block mb-2">Nghĩa</span>
                         <p className="text-2xl md:text-3xl font-bold text-slate-800">{currentCard.meaning}</p>
