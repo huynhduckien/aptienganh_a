@@ -199,7 +199,14 @@ const App: React.FC = () => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
+      
+      // Auto-detect Chinese characters (Hanzi) range \u4e00-\u9fa5
+      if (/[\u4e00-\u9fa5]/.test(text)) {
+          utterance.lang = 'zh-CN';
+      } else {
+          utterance.lang = 'en-US';
+      }
+      
       utterance.rate = 0.9;
       window.speechSynthesis.speak(utterance);
     }

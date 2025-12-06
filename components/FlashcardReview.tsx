@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { Flashcard, ReviewRating, AnkiStats } from '../types';
 import { updateCardStatus, getAnkiStats, setDailyLimit, importFlashcardsFromSheet } from '../services/flashcardService';
@@ -42,11 +41,20 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   };
 
   const playAudio = (text: string) => {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        
+        // Auto-detect Chinese characters (Hanzi) range \u4e00-\u9fa5
+        if (/[\u4e00-\u9fa5]/.test(text)) {
+            utterance.lang = 'zh-CN';
+        } else {
+            utterance.lang = 'en-US';
+        }
+
+        utterance.rate = 0.9;
+        window.speechSynthesis.speak(utterance);
+    }
   };
 
   const handleRate = async (rating: ReviewRating) => {
