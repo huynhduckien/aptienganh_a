@@ -45,10 +45,16 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
         
-        // Auto-detect Chinese characters (Hanzi) range \u4e00-\u9fa5
+        // 1. Chinese (Hanzi detection)
         if (/[\u4e00-\u9fa5]/.test(text)) {
             utterance.lang = 'zh-CN';
-        } else {
+        }
+        // 2. French (Common accents detection)
+        else if (/[éàèùâêîôûëïüÿçœæ]/i.test(text)) {
+            utterance.lang = 'fr-FR';
+        }
+        // 3. Default English
+        else {
             utterance.lang = 'en-US';
         }
 
