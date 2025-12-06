@@ -86,8 +86,11 @@ export interface AnkiStats {
     };
     forecast: {
         // [daysFromNow]: count
-        data: number[]; 
+        // UPDATE: Split into Young (<21 days) and Mature (>=21 days) for stacked chart
+        young: number[];
+        mature: number[]; 
         labels: string[];
+        maxTotal: number; // Helper for scaling
     };
     counts: {
         new: number;       // Chưa học

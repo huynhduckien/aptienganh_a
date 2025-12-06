@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { Flashcard, ReviewRating, AnkiStats } from '../types';
 import { updateCardStatus, getAnkiStats, setDailyLimit, importFlashcardsFromSheet, getIntervalPreviewText } from '../services/flashcardService';
@@ -28,7 +27,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   const [importMsg, setImportMsg] = useState('');
 
   // Chart Filters
-  const [forecastRange, setForecastRange] = useState<'1m' | '3m'>('1m');
+  const [forecastRange, setForecastRange] = useState<'1m' | '3m' | '1y'>('1m');
 
   useEffect(() => {
     refreshStats();
@@ -131,6 +130,55 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       )
   };
 
+  // NEW: Stacked Bar Chart for Forecast (Anki Style)
+  const StackedForecastChart = ({ young, mature, labels }: { young: number[], mature: number[], labels: string[] }) => {
+      // Calculate local max for the current view slice to scale bars properly
+      let localMax = 0;
+      for (let i = 0; i < young.length; i++) {
+          const total = young[i] + mature[i];
+          if (total > localMax) localMax = total;
+      }
+      const safeMax = Math.max(localMax, 1);
+      
+      // Dynamic label interval based on data length
+      const labelInterval = Math.ceil(young.length / 7);
+
+      return (
+        <div className="flex items-end justify-between h-32 gap-0.5 md:gap-px pt-4 w-full overflow-hidden relative">
+            {/* Y-Axis Grid lines (Optional, simple) */}
+            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-10">
+                <div className="border-t border-slate-900 w-full"></div>
+                <div className="border-t border-slate-900 w-full"></div>
+                <div className="border-t border-slate-900 w-full"></div>
+            </div>
+
+            {young.map((yVal, idx) => {
+                 const mVal = mature[idx];
+                 const total = yVal + mVal;
+                 const heightPercent = (total / safeMax) * 100;
+                 
+                 const youngHeightPercent = total > 0 ? (yVal / total) * 100 : 0;
+                 const matureHeightPercent = total > 0 ? (mVal / total) * 100 : 0;
+
+                 return (
+                    <div key={idx} className="flex-1 flex flex-col justify-end items-center group relative min-w-[1px] h-full">
+                        <div className="w-full flex flex-col-reverse rounded-t-sm overflow-hidden hover:brightness-90 transition-all" style={{ height: `${heightPercent}%` }}>
+                            {/* Mature (Bottom) */}
+                            <div className="w-full bg-emerald-700" style={{ height: `${matureHeightPercent}%` }} title={`Mature: ${mVal}`}></div>
+                            {/* Young (Top) */}
+                            <div className="w-full bg-lime-400" style={{ height: `${youngHeightPercent}%` }} title={`Young: ${yVal}`}></div>
+                        </div>
+                        
+                        {(idx % labelInterval === 0) && (
+                            <span className="text-[8px] md:text-[9px] text-slate-400 mt-1 absolute top-full whitespace-nowrap">{labels[idx]}</span>
+                        )}
+                    </div>
+                 )
+            })}
+        </div>
+      );
+  };
+
   const DonutChart = ({ counts }: { counts: AnkiStats['counts'] }) => {
       const total = Math.max(counts.total, 1);
       
@@ -143,8 +191,8 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
       const gradient = `conic-gradient(
           #3b82f6 0deg ${pNew}deg, 
           #f97316 ${pNew}deg ${pNew + pLearning}deg,
-          #86efac ${pNew + pLearning}deg ${pNew + pLearning + pYoung}deg,
-          #22c55e ${pNew + pLearning + pYoung}deg 360deg
+          #a3e635 ${pNew + pLearning}deg ${pNew + pLearning + pYoung}deg,
+          #047857 ${pNew + pLearning + pYoung}deg 360deg
       )`;
 
       return (
@@ -160,8 +208,8 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                <div className="grid grid-cols-2 md:grid-cols-1 gap-x-4 gap-y-1 text-xs font-medium">
                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-sm"></div> New: {counts.new}</div>
                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-orange-500 rounded-sm"></div> Learning: {counts.learning}</div>
-                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-300 rounded-sm"></div> Young: {counts.young}</div>
-                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500 rounded-sm"></div> Mature: {counts.mature}</div>
+                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-lime-400 rounded-sm"></div> Young: {counts.young}</div>
+                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-emerald-700 rounded-sm"></div> Mature: {counts.mature}</div>
                </div>
           </div>
       )
@@ -170,6 +218,8 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   // --- MAIN RENDER ---
 
   if (view === 'overview') {
+      const forecastSlice = forecastRange === '1m' ? 30 : forecastRange === '3m' ? 90 : 365;
+
       return (
         <div className="fixed inset-0 z-50 bg-slate-100 flex flex-col md:block overflow-hidden md:overflow-y-auto md:p-4">
              {/* Mobile Header */}
@@ -215,21 +265,28 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                              </div>
                          </div>
 
-                         {/* CARD: DỰ BÁO */}
+                         {/* CARD: DỰ BÁO (Updated Anki Style) */}
                          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
                              <div className="flex justify-between items-center mb-4 border-b pb-2">
                                 <h3 className="text-lg font-semibold text-slate-800">Dự báo</h3>
                                 <div className="space-x-2 text-[10px]">
                                     <label className="cursor-pointer"><input type="radio" checked={forecastRange==='1m'} onChange={()=>setForecastRange('1m')} className="mr-1"/>1 tháng</label>
                                     <label className="cursor-pointer"><input type="radio" checked={forecastRange==='3m'} onChange={()=>setForecastRange('3m')} className="mr-1"/>3 tháng</label>
+                                    <label className="cursor-pointer"><input type="radio" checked={forecastRange==='1y'} onChange={()=>setForecastRange('1y')} className="mr-1"/>1 năm</label>
                                 </div>
                              </div>
-                             <div className="flex-1 w-full overflow-hidden">
+                             <div className="flex-1 w-full overflow-hidden relative">
                                  <div className="text-center text-xs text-slate-500 mb-2">Số thẻ ôn tập đến hạn trong tương lai.</div>
-                                 <SimpleBarChart 
-                                    data={forecastRange === '1m' ? stats.forecast.data.slice(0, 30) : stats.forecast.data} 
-                                    labels={forecastRange === '1m' ? stats.forecast.labels.slice(0, 30) : stats.forecast.labels} 
-                                    color="bg-slate-300"
+                                 
+                                 <div className="absolute top-0 right-0 flex gap-3 text-[10px]">
+                                     <div className="flex items-center gap-1"><div className="w-2 h-2 bg-lime-400"></div>Young</div>
+                                     <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-700"></div>Mature</div>
+                                 </div>
+
+                                 <StackedForecastChart 
+                                    young={stats.forecast.young.slice(0, forecastSlice)} 
+                                    mature={stats.forecast.mature.slice(0, forecastSlice)}
+                                    labels={stats.forecast.labels.slice(0, forecastSlice)} 
                                  />
                              </div>
                          </div>
@@ -392,51 +449,58 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                      
                      <div className="bg-indigo-50/50 p-4 md:p-6 rounded-xl text-left border border-indigo-50">
                         <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-2">Ngữ cảnh / Ghi chú</span>
-                        <p className="text-slate-700 text-sm md:text-base leading-relaxed whitespace-pre-line">
-                            {currentCard.explanation}
-                        </p>
+                        <p className="text-slate-700 leading-relaxed text-sm md:text-base">{currentCard.explanation || "Không có giải thích"}</p>
                      </div>
                 </div>
             ) : (
-                <div className="mt-8 text-slate-300 text-sm font-medium animate-pulse flex flex-col items-center gap-2">
-                    <span>👆</span>
-                    <span>Chạm để xem đáp án</span>
+                <div className="absolute bottom-10 text-slate-400 animate-bounce">
+                    chạm để lật
                 </div>
             )}
         </div>
 
-        {/* Action Buttons - Fixed at bottom */}
-        <div className="p-4 bg-white border-t border-slate-200 shrink-0 pb-safe">
-            {isFlipped ? (
-                // Responsive Grid: 2x2 on Mobile, 4x1 on Desktop
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
-                    <button onClick={() => handleRate('again')} className="bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-700 py-3 md:py-4 rounded-xl flex flex-col items-center border border-rose-200 transition-colors">
-                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreviewText(currentCard, 'again')}</span>
-                        <span className="font-bold text-lg">Again</span>
-                    </button>
-                    <button onClick={() => handleRate('hard')} className="bg-orange-50 hover:bg-orange-100 active:bg-orange-200 text-orange-700 py-3 md:py-4 rounded-xl flex flex-col items-center border border-orange-200 transition-colors">
-                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreviewText(currentCard, 'hard')}</span>
-                        <span className="font-bold text-lg">Hard</span>
-                    </button>
-                    <button onClick={() => handleRate('good')} className="bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-700 py-3 md:py-4 rounded-xl flex flex-col items-center border border-emerald-200 transition-colors">
-                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreviewText(currentCard, 'good')}</span>
-                        <span className="font-bold text-lg">Good</span>
-                    </button>
-                    <button onClick={() => handleRate('easy')} className="bg-sky-50 hover:bg-sky-100 active:bg-sky-200 text-sky-700 py-3 md:py-4 rounded-xl flex flex-col items-center border border-sky-200 transition-colors">
-                        <span className="text-[10px] font-bold mb-0.5 opacity-60">{getIntervalPreviewText(currentCard, 'easy')}</span>
-                        <span className="font-bold text-lg">Easy</span>
-                    </button>
-                </div>
-            ) : (
+        {/* Action Bar */}
+        <div className="p-2 md:p-4 bg-white border-t border-slate-200 shrink-0">
+            {!isFlipped ? (
                 <button 
-                    onClick={() => setIsFlipped(true)} 
-                    className="w-full py-4 bg-slate-900 text-white font-bold text-lg rounded-xl hover:bg-slate-800 active:scale-[0.98] transition-all shadow-lg shadow-slate-200"
+                    onClick={() => setIsFlipped(true)}
+                    className="w-full py-4 bg-slate-900 text-white font-bold rounded-xl text-lg hover:bg-slate-800 transition-all active:scale-95"
                 >
                     Hiện đáp án
                 </button>
+            ) : (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
+                    <button 
+                        onClick={() => handleRate('again')}
+                        className="flex flex-col items-center justify-center py-3 bg-red-50 text-red-700 rounded-xl border border-red-100 hover:bg-red-100 transition-all active:scale-95"
+                    >
+                        <span className="text-[10px] font-bold opacity-60 mb-1">{getIntervalPreviewText(currentCard, 'again')}</span>
+                        <span className="font-bold">Again</span>
+                    </button>
+                    <button 
+                        onClick={() => handleRate('hard')}
+                        className="flex flex-col items-center justify-center py-3 bg-orange-50 text-orange-700 rounded-xl border border-orange-100 hover:bg-orange-100 transition-all active:scale-95"
+                    >
+                        <span className="text-[10px] font-bold opacity-60 mb-1">{getIntervalPreviewText(currentCard, 'hard')}</span>
+                        <span className="font-bold">Hard</span>
+                    </button>
+                    <button 
+                        onClick={() => handleRate('good')}
+                        className="flex flex-col items-center justify-center py-3 bg-green-50 text-green-700 rounded-xl border border-green-100 hover:bg-green-100 transition-all active:scale-95"
+                    >
+                        <span className="text-[10px] font-bold opacity-60 mb-1">{getIntervalPreviewText(currentCard, 'good')}</span>
+                        <span className="font-bold">Good</span>
+                    </button>
+                    <button 
+                        onClick={() => handleRate('easy')}
+                        className="flex flex-col items-center justify-center py-3 bg-sky-50 text-sky-700 rounded-xl border border-sky-100 hover:bg-sky-100 transition-all active:scale-95"
+                    >
+                        <span className="text-[10px] font-bold opacity-60 mb-1">{getIntervalPreviewText(currentCard, 'easy')}</span>
+                        <span className="font-bold">Easy</span>
+                    </button>
+                </div>
             )}
         </div>
-
       </div>
     </div>
   );

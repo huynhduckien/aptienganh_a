@@ -1,5 +1,4 @@
 
-
 import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint, AnkiStats } from "../types";
 import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB } from "./db";
 import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey } from "./firebaseService";
@@ -334,21 +333,39 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
         }
     });
 
-    // 3. FORECAST (Future Due Dates) - 30 days
-    const forecastMap = new Array(31).fill(0);
-    const forecastLabels = new Array(31).fill('').map((_, i) => i === 0 ? 'Today' : `+${i}d`);
+    // 3. FORECAST (Future Due Dates) - 365 days
+    const FORECAST_DAYS = 365;
+    const forecastYoung = new Array(FORECAST_DAYS).fill(0);
+    const forecastMature = new Array(FORECAST_DAYS).fill(0);
+    const forecastLabels = new Array(FORECAST_DAYS).fill('').map((_, i) => i === 0 ? 'Today' : `+${i}d`);
+    let maxForecast = 0;
     
     cards.forEach(c => {
-        if (c.nextReview > now && c.interval < 10000) {
-            const diffTime = Math.abs(c.nextReview - now);
-            const diffDays = Math.ceil(diffTime / ONE_DAY);
-            if (diffDays <= 30) {
-                forecastMap[diffDays]++;
+        if (c.interval >= 10000) return; // Skip mastered
+
+        let diffDays = 0;
+        if (c.nextReview <= now) {
+            diffDays = 0;
+        } else {
+            const diffTime = c.nextReview - now;
+            diffDays = Math.ceil(diffTime / ONE_DAY);
+        }
+
+        if (diffDays < FORECAST_DAYS) {
+            // Anki Definition: Mature = Interval >= 21 days
+            if (c.interval >= 21) {
+                forecastMature[diffDays]++;
+            } else {
+                forecastYoung[diffDays]++;
             }
-        } else if (c.nextReview <= now && c.interval < 10000) {
-             forecastMap[0]++;
         }
     });
+
+    // Calculate max for global scale (optional)
+    for(let i=0; i<FORECAST_DAYS; i++) {
+        const total = forecastYoung[i] + forecastMature[i];
+        if (total > maxForecast) maxForecast = total;
+    }
 
     // 4. INTERVALS
     const intervalBuckets = [0, 0, 0, 0, 0, 0, 0];
@@ -369,7 +386,12 @@ export const getAnkiStats = async (): Promise<AnkiStats> => {
     return {
         today: todayStats,
         counts,
-        forecast: { data: forecastMap, labels: forecastLabels },
+        forecast: { 
+            young: forecastYoung, 
+            mature: forecastMature, 
+            labels: forecastLabels,
+            maxTotal: maxForecast 
+        },
         intervals: { data: intervalBuckets, labels: intervalLabels }
     };
 };
@@ -489,7 +511,7 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
       nextReview, 
       interval, 
       easeFactor, 
-      repetitions,
+      repetitions, 
       step,
       level: interval >= 21 ? 2 : 1 
   };
