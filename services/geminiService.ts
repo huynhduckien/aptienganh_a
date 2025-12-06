@@ -2,37 +2,62 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
 import { translateTextFallback } from "./translationService";
+import { fetchCloudDictionary, saveCloudDictionaryItem } from "./firebaseService";
 
 // Khởi tạo AI Client
 const apiKey = process.env.API_KEY;
 
-// DEBUG LOGGING - GIÚP BẠN KIỂM TRA TRÊN VERCEL
-console.log("Checking API Key status:", apiKey ? "✅ Key Found (" + apiKey.substring(0, 5) + "...)" : "❌ Key Missing (Value is empty)");
+// DEBUG LOGGING
+console.log("Checking API Key status:", apiKey ? "✅ Key Found" : "❌ Key Missing");
 
 if (!apiKey || apiKey.length < 10) {
     console.warn("⚠️ API Key đang bị RỖNG hoặc KHÔNG HỢP LỆ. Web sẽ chạy chế độ Fallback.");
 } 
 
 const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_init" });
-
-// Use standard Flash model for better quality translation
 const MODEL_NAME = "gemini-2.0-flash-lite-preview-02-05";
 
-// --- PERSISTENT CACHE ---
+// --- PERSISTENT CACHE (Local + Cloud) ---
 const CACHE_KEY = 'paperlingo_dictionary_cache_v8'; 
-const loadCache = (): Map<string, DictionaryResponse> => {
+let dictionaryCache = new Map<string, DictionaryResponse>();
+
+// Hàm khởi tạo Cache: Local + Cloud
+const initCache = async () => {
+    // 1. Load LocalStorage
     try {
         const stored = localStorage.getItem(CACHE_KEY);
         if (stored) {
-            return new Map(JSON.parse(stored));
+            dictionaryCache = new Map(JSON.parse(stored));
         }
     } catch (e) {
-        console.warn("Failed to load dictionary cache", e);
+        console.warn("Failed to load local dictionary cache", e);
     }
-    return new Map();
+
+    // 2. Load Cloud (Firebase) -> Merge vào Local
+    if (navigator.onLine) {
+        try {
+            const cloudDict = await fetchCloudDictionary();
+            let hasUpdate = false;
+            Object.values(cloudDict).forEach((item: any) => {
+                if (item.originalTerm) {
+                    const key = item.originalTerm.trim().toLowerCase();
+                    if (!dictionaryCache.has(key)) {
+                        dictionaryCache.set(key, item);
+                        hasUpdate = true;
+                    }
+                }
+            });
+            if (hasUpdate) {
+                saveCacheToStorage();
+            }
+        } catch (e) {
+            console.warn("Failed to sync cloud dictionary", e);
+        }
+    }
 };
 
-const dictionaryCache = loadCache();
+// Gọi khởi tạo ngay
+initCache();
 
 const saveCacheToStorage = () => {
     try {
@@ -118,7 +143,6 @@ const getFallbackLesson = (text: string, translatedText?: string): LessonContent
     source: 'Fallback'
 });
 
-// IMPROVED FALLBACK
 const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse> => {
     let phonetic = "";
     let definitionEN = "";
@@ -130,10 +154,10 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
             const data = await response.json();
             const firstEntry = data[0];
             
-            // Phonetic Logic: Prioritize ones with audio or text
             if (firstEntry.phonetics && Array.isArray(firstEntry.phonetics)) {
-                // Find one that looks like IPA (has slashes)
-                const ipa = firstEntry.phonetics.find((p: any) => p.text && p.text.includes('/'));
+                // Find pure IPA (text inside slashes /.../)
+                const ipa = firstEntry.phonetics.find((p: any) => p.text && p.text.trim().match(/^\/.*\/$/));
+                // Find any text
                 const anyP = firstEntry.phonetics.find((p: any) => p.text);
                 
                 phonetic = ipa?.text || anyP?.text || "";
@@ -142,7 +166,7 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
                 phonetic = firstEntry.phonetic;
             }
             
-            // Clean phonetic: Remove existing slashes so UI can add them consistently
+            // Cleanup phonetic: ensure no brackets for consistency
             if (phonetic) {
                 phonetic = phonetic.replace(/^[\/\[]/, '').replace(/[\/\]]$/, '');
             }
@@ -174,7 +198,6 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
     };
 };
 
-// Helper to reliably extract JSON
 const extractJSON = (text: string): any => {
     try {
         return JSON.parse(text);
@@ -191,26 +214,15 @@ const extractJSON = (text: string): any => {
     }
 };
 
-// Aggressive cleaner for Tooltip (Short Meaning)
-// STRICTLY removes brackets but ALLOWS longer text for accuracy
 const cleanShortMeaning = (text: string): string => {
     let cleaned = text;
-    
-    // 1. Remove anything inside round brackets (...) or square brackets [...]
-    // This removes parts of speech like (noun) or notes
+    // Strictly remove content in brackets
     cleaned = cleaned.replace(/[\(\[].*?[\)\]]/g, '');
-    
-    // 2. Remove common prefixes/suffixes AI adds
     cleaned = cleaned.replace(/^nghĩa là\s+/i, '');
     cleaned = cleaned.replace(/^là\s+/i, '');
-
-    // 3. We NO LONGER split by commas to allow synonyms or full phrases.
-    // But we still split by semicolon if AI gives multiple distinct definitions.
+    // Split by semicolon to keep main meanings
     cleaned = cleaned.split(/[;]/)[0];
-    
-    // 4. Trim spaces
     cleaned = cleaned.trim();
-    
     return cleaned;
 };
 
@@ -258,13 +270,16 @@ export interface DictionaryResponse {
     shortMeaning: string;
     detailedExplanation: string;
     phonetic: string;
+    originalTerm?: string; // Used for cloud sync
 }
 
 export const explainPhrase = async (phrase: string, fullContext: string): Promise<DictionaryResponse> => {
     const cacheKey = phrase.trim().toLowerCase();
+    
+    // 1. Check Cache (Local or loaded from Cloud)
     if (dictionaryCache.has(cacheKey)) return dictionaryCache.get(cacheKey)!;
 
-    // Fast fail to fallback if rate limit or no key
+    // Fast fail check
     if (!checkRateLimit() || !apiKey || apiKey.length < 10) {
          return await fetchVietnameseFallback(phrase);
     }
@@ -278,11 +293,11 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
                 Term: "${phrase}"
                 Context: "${fullContext}"
                 
-                OUTPUT JSON ONLY with this exact structure:
+                OUTPUT JSON ONLY:
                 {
-                  "shortMeaning": "TRANSLATE term to Vietnamese accurately. Keep it concise but ensure the FULL meaning is conveyed. NO brackets. NO parts of speech. NO explanations.",
+                  "shortMeaning": "TRANSLATE term to Vietnamese. Concise.",
                   "phonetic": "IPA format (JUST text, e.g. wɜːrd, NO slashes)",
-                  "detailedExplanation": "Explain the meaning and usage in this context in Vietnamese. You can include part of speech and detailed nuance here."
+                  "detailedExplanation": "Explain meaning and usage in this context in Vietnamese."
                 }
                 `,
                 config: { 
@@ -302,15 +317,18 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
             return extractJSON(response.text || "{}") as DictionaryResponse;
         }, 1, 1000); 
         
-        // Aggressive cleaning
+        // Clean and Cache
         result.shortMeaning = cleanShortMeaning(result.shortMeaning);
-        // Ensure phonetic has no slashes (so UI can add them)
         if (result.phonetic) {
             result.phonetic = result.phonetic.replace(/^[\/\[]/, '').replace(/[\/\]]$/, '');
         }
         
         dictionaryCache.set(cacheKey, result);
         saveCacheToStorage();
+        
+        // 2. Sync new term to Cloud (Background)
+        saveCloudDictionaryItem(phrase, result);
+        
         return result;
 
     } catch (error) {

@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { LessonView } from './components/LessonView';
 import { Dashboard } from './components/Dashboard';
 import { chunkTextByLevel, DifficultyLevel } from './services/pdfService';
 import { ProcessedChunk, SavedPaper, Flashcard } from './types';
-import { saveFlashcard, getDueFlashcards } from './services/flashcardService';
+import { saveFlashcard, getDueFlashcards, getFlashcards } from './services/flashcardService';
 import { FlashcardReview } from './components/FlashcardReview';
 import { savePaperToDB, getAllPapersFromDB, updatePaperProgress, deletePaperFromDB, generateId } from './services/db';
 
@@ -30,7 +31,9 @@ const App: React.FC = () => {
   // Load papers and flashcards on init
   useEffect(() => {
     loadPapers();
-    updateDueCount();
+    // Trigger Flashcard Sync (will fetch from Firebase if needed)
+    getFlashcards().then(() => updateDueCount());
+    
     const interval = setInterval(updateDueCount, 60000);
     return () => clearInterval(interval);
   }, []);
@@ -39,9 +42,6 @@ const App: React.FC = () => {
     try {
         const savedPapers = await getAllPapersFromDB();
         setPapers(savedPapers);
-        if (savedPapers.length === 0 && appState === 'dashboard') {
-            // Stay on dashboard, list is just empty
-        }
     } catch (e) {
         console.error("Failed to load papers", e);
     }
@@ -66,7 +66,6 @@ const App: React.FC = () => {
       isCompleted: false
     }));
 
-    // Create new paper object
     const newPaper: SavedPaper = {
         id: generateId(),
         fileName: fileName,
@@ -77,10 +76,8 @@ const App: React.FC = () => {
         lastOpened: Date.now()
     };
 
-    // Save to DB
     await savePaperToDB(newPaper);
     
-    // Update State
     setPapers(prev => [newPaper, ...prev]);
     setCurrentPaperId(newPaper.id);
     setChunks(initialChunks);
@@ -97,9 +94,8 @@ const App: React.FC = () => {
     setCurrentChunkIndex(paper.currentChunkIndex);
     setCurrentPaperId(paper.id);
     
-    // Update last opened
     await updatePaperProgress(paper.id, paper.processedChunks, paper.currentChunkIndex);
-    loadPapers(); // Refresh list order
+    loadPapers(); 
     
     setAppState('study');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -107,17 +103,14 @@ const App: React.FC = () => {
 
   const handleDeletePaper = async (id: string) => {
       if (window.confirm("Bạn có chắc chắn muốn xóa bài báo này?")) {
-          // 1. Cập nhật giao diện ngay lập tức (Optimistic Update)
           setPapers(prev => prev.filter(p => p.id !== id));
 
           try {
-              // 2. Xóa trong database
               await deletePaperFromDB(id);
-              // Không cần loadPapers() lại nếu không có lỗi, vì state đã đúng
           } catch (error) {
               console.error("Failed to delete paper", error);
               alert("Không thể xóa bài báo. Vui lòng thử lại.");
-              loadPapers(); // Rollback nếu lỗi
+              loadPapers(); 
           }
       }
   };
@@ -213,10 +206,8 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="w-full max-w-[98%] xl:max-w-[1900px] mx-auto px-4 sm:px-6 py-6 md:py-8">
         
-        {/* Dashboard State */}
         {appState === 'dashboard' && (
             <Dashboard 
                 papers={papers}
@@ -227,7 +218,6 @@ const App: React.FC = () => {
             />
         )}
 
-        {/* Upload State */}
         {appState === 'upload' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
             <button 
@@ -240,7 +230,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Level Select State */}
         {appState === 'level_select' && (
            <div className="max-w-3xl mx-auto text-center py-12 animate-in fade-in zoom-in duration-300">
               <h2 className="text-3xl font-bold text-slate-900 mb-3">Chọn cấp độ phù hợp</h2>
@@ -272,11 +261,9 @@ const App: React.FC = () => {
            </div>
         )}
 
-        {/* Study State */}
         {appState === 'study' && (
           <div className="flex flex-col lg:flex-row gap-6 xl:gap-8 items-start">
             
-            {/* Main Area */}
             <div className="flex-1 w-full min-w-0">
                <div className="flex items-center justify-between mb-4">
                  <button onClick={() => { setAppState('dashboard'); loadPapers(); }} className="text-sm font-bold text-slate-400 hover:text-slate-600">
@@ -300,10 +287,8 @@ const App: React.FC = () => {
               />
             </div>
 
-            {/* Sidebar Desktop */}
             <div className="hidden lg:block w-80 xl:w-96 sticky top-24 shrink-0 space-y-4">
                
-               {/* Dictionary Card */}
                {dictionary ? (
                    <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-[0_4px_20px_-4px_rgba(14,165,233,0.15)] relative animate-in slide-in-from-right duration-300 ring-1 ring-indigo-500/10 flex flex-col gap-6">
                         <button 
@@ -313,7 +298,6 @@ const App: React.FC = () => {
                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                         </button>
                         
-                        {/* 1. TỪ VỰNG (Vocabulary) */}
                         <div className="border-b border-slate-100 pb-4">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Từ vựng</span>
                             <div className="flex items-baseline justify-between">
@@ -328,7 +312,6 @@ const App: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* 2. PHIÊN ÂM (Phonetic) - Fix display */}
                         {dictionary.phonetic && (
                             <div>
                                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Phiên âm</span>
@@ -340,7 +323,6 @@ const App: React.FC = () => {
                             </div>
                         )}
                         
-                        {/* 3. GIẢI THÍCH (Explanation) */}
                         <div>
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Giải thích</span>
                             <div className="text-sm text-slate-700 leading-relaxed bg-indigo-50/50 p-4 rounded-xl border border-indigo-50 whitespace-pre-line">
@@ -368,7 +350,6 @@ const App: React.FC = () => {
                    </div>
                )}
 
-               {/* Navigation Grid */}
                <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col max-h-[50vh]">
                   <div className="flex items-center justify-between mb-4">
                       <span className="text-xs font-bold text-slate-400 uppercase">Mục lục</span>
@@ -398,7 +379,6 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* FLASHCARD MODAL */}
       {showFlashcards && (
         <FlashcardReview 
             cards={dueCards} 
