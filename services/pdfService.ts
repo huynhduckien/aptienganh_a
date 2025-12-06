@@ -23,7 +23,7 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
           fullText += pageText + '\n\n'; 
         }
 
-        // Apply cleaning (Generic)
+        // Apply cleaning (Generic but aggressive for English)
         let cleanedText = cleanIrrelevantContent(fullText);
         
         resolve(cleanedText);
@@ -39,20 +39,62 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
 
 // Cleaner for metadata, headers, footers, and noise
 const cleanIrrelevantContent = (text: string): string => {
-  let cleaned = text;
+  // 1. Split into lines to process headers/footers
+  let lines = text.split('\n');
 
-  // Generic Cleaning
-  cleaned = cleaned.replace(/(?:Contents lists available at|Hosted by)?\s*ScienceDirect/gi, '');
-  cleaned = cleaned.replace(/[a-zA-Z\s&]+\d+\s*\(\d{4}\)\s*[\d-]+/g, '');
-  cleaned = cleaned.replace(/\b\d{4}-\d{3}[\dX]\b/g, ''); // ISSN
-  cleaned = cleaned.replace(/^\s*.*?\)\.\s*$/gim, '');
-  cleaned = cleaned.replace(/^.*journal homepage:.*$/gim, '');
-  cleaned = cleaned.replace(/https?:\/\/[^\s]+/gi, '');
-  cleaned = cleaned.replace(/doi:?\s*10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi, '');
-  cleaned = cleaned.replace(/[\w\.-]+@[\w\.-]+\.\w+/gi, '');
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  // 2. Filter out garbage lines
+  lines = lines.filter(line => {
+      const l = line.trim();
+      const lower = l.toLowerCase();
 
-  return cleaned;
+      // Skip empty lines (we will rejoin later)
+      if (l.length === 0) return false;
+
+      // A. Page numbers / Isolated numbers
+      if (/^\d+$/.test(l) || /^\d+\s*\/\s*\d+$/.test(l)) return false;
+
+      // B. Common Academic Metadata keywords (Starts with...)
+      const startsWithGarbage = [
+          'received', 'accepted', 'published', 'available online', 
+          'copyright', '©', 'doi:', 'https:', 'http:', 'www.', 
+          'email:', 'correspondence', 'keywords:', 'article info',
+          'volume', 'issue', 'pp.', 'downloaded from', 'journal of'
+      ];
+      if (startsWithGarbage.some(keyword => lower.startsWith(keyword))) return false;
+
+      // C. Emails
+      if (/@/.test(l) && (l.includes('.com') || l.includes('.edu') || l.includes('.org') || l.includes('.ac'))) return false;
+
+      // D. Figure/Table Captions (often interrupt reading)
+      if (/^(fig\.|figure|table)\s?\d+/i.test(l)) return false;
+
+      // E. Authorship credit
+      if (lower.includes('credit authorship') || lower.includes('declaration of competing')) return false;
+
+      return true;
+  });
+
+  // 3. Rejoin text
+  let cleaned = lines.join(' '); // Join with space to merge broken paragraphs
+
+  // 4. In-text Regex Cleaning (Aggressive)
+
+  // Remove Citations [1], [1,2], [1-3]
+  cleaned = cleaned.replace(/\[\d+(?:,\s*\d+)*(?:[-–]\d+)?\]/g, '');
+  
+  // Remove Citations (Author, Year) - Use with caution, mostly for (Name et al., 2020)
+  cleaned = cleaned.replace(/\([A-Z][a-z]+(?:\s+et\s+al\.)?,\s*\d{4}\)/g, '');
+
+  // Remove URLs that were inline
+  cleaned = cleaned.replace(/https?:\/\/[^\s\)]+/gi, '');
+
+  // Remove multiple spaces/newlines
+  cleaned = cleaned.replace(/\s+/g, ' ');
+
+  // Fix broken hyphenations (e.g. "commu- nication" -> "communication")
+  cleaned = cleaned.replace(/(\w+)-\s+(\w+)/g, '$1$2');
+
+  return cleaned.trim();
 };
 
 // Helper to filter specific academic sections
@@ -163,7 +205,7 @@ export const chunkTextByLevel = (text: string, level: DifficultyLevel, language:
               endIndex = cleanText.length;
           } else {
               // Look for the nearest punctuation to split cleanly
-              // Punctuation: 。 ！ ？ \n
+              // Punctuation: 。 ！ \n
               const searchWindow = 100; // Look ahead/behind 100 chars
               const slice = cleanText.substring(Math.max(0, endIndex - searchWindow), Math.min(cleanText.length, endIndex + searchWindow));
               
