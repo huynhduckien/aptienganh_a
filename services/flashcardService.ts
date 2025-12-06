@@ -261,6 +261,22 @@ export const getDueFlashcards = async (): Promise<Flashcard[]> => {
   return allDue.slice(0, remainingQuota);
 };
 
+export const getForgottenCardsToday = async (): Promise<Flashcard[]> => {
+    const logs = await getReviewLogsFromDB();
+    const cards = await getFlashcards();
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const todayTs = startOfDay.getTime();
+    
+    // Get IDs of cards marked 'again' today
+    const forgottenIds = new Set(
+        logs.filter(l => l.timestamp >= todayTs && l.rating === 'again')
+            .map(l => l.cardId)
+    );
+
+    return cards.filter(c => forgottenIds.has(c.id));
+};
+
 export const getFlashcardStats = async (): Promise<FlashcardStats> => {
     const cards = await getFlashcards();
     const now = Date.now();

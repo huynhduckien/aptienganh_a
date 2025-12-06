@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Flashcard, ReviewRating, AnkiStats } from '../types';
-import { updateCardStatus, getAnkiStats, setDailyLimit, importFlashcardsFromSheet, getIntervalPreviewText } from '../services/flashcardService';
+import { updateCardStatus, getAnkiStats, setDailyLimit, importFlashcardsFromSheet, getIntervalPreviewText, getForgottenCardsToday } from '../services/flashcardService';
 
 interface FlashcardReviewProps {
   cards: Flashcard[]; // These are the DUE cards
@@ -25,6 +25,10 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   const [importUrl, setImportUrl] = useState('');
   const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [importMsg, setImportMsg] = useState('');
+
+  // Forgotten List State
+  const [showForgotten, setShowForgotten] = useState(false);
+  const [forgottenList, setForgottenList] = useState<Flashcard[]>([]);
 
   // Chart Filters
   const [forecastRange, setForecastRange] = useState<'1m' | '3m' | '1y'>('1m');
@@ -104,6 +108,12 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
           refreshStats();
           onUpdate();
       }
+  };
+
+  const handleShowForgotten = async () => {
+      const cards = await getForgottenCardsToday();
+      setForgottenList(cards);
+      setShowForgotten(true);
   };
 
   // --- CHART COMPONENTS (CSS ONLY) ---
@@ -337,9 +347,12 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                                                  <div className="text-2xl font-bold text-slate-700">{stats.today.studied}</div>
                                                  <div className="text-[10px] text-slate-400 uppercase font-bold">Đã học</div>
                                              </div>
-                                             <div className="bg-red-50 p-3 rounded-xl border border-red-100 text-center">
+                                             <div 
+                                                 onClick={handleShowForgotten}
+                                                 className="bg-red-50 p-3 rounded-xl border border-red-100 text-center cursor-pointer hover:bg-red-100 transition-colors"
+                                             >
                                                  <div className="text-2xl font-bold text-red-600">{stats.today.againCount}</div>
-                                                 <div className="text-[10px] text-red-400 uppercase font-bold">Quên bài</div>
+                                                 <div className="text-[10px] text-red-400 uppercase font-bold">Quên bài (Xem lại)</div>
                                              </div>
                                          </div>
                                      </div>
@@ -489,6 +502,40 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                      </div>
                  )}
              </div>
+
+             {/* FORGOTTEN CARDS MODAL */}
+             {showForgotten && (
+                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                     <div className="bg-white w-full max-w-lg max-h-[80vh] rounded-2xl shadow-2xl flex flex-col animate-in zoom-in-95 duration-200">
+                         <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-red-50 rounded-t-2xl">
+                             <h3 className="font-bold text-red-800 flex items-center gap-2">
+                                 <span>⚠️</span> Từ đã quên hôm nay
+                             </h3>
+                             <button onClick={() => setShowForgotten(false)} className="text-red-400 hover:text-red-700 font-bold px-2">✕</button>
+                         </div>
+                         <div className="p-4 overflow-y-auto flex-1 custom-scrollbar">
+                             {forgottenList.length === 0 ? (
+                                 <div className="text-center text-slate-400 py-8">Bạn chưa quên từ nào hôm nay.</div>
+                             ) : (
+                                 <div className="space-y-3">
+                                     {forgottenList.map(card => (
+                                         <div key={card.id} className="p-3 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-shadow">
+                                             <div className="flex justify-between items-start mb-1">
+                                                 <h4 className="font-bold text-slate-900 text-lg">{card.term}</h4>
+                                                 {card.phonetic && <span className="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-500">/{card.phonetic}/</span>}
+                                             </div>
+                                             <p className="text-slate-600 text-sm">{card.meaning}</p>
+                                         </div>
+                                     ))}
+                                 </div>
+                             )}
+                         </div>
+                         <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl text-center">
+                             <button onClick={() => setShowForgotten(false)} className="px-6 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800">Đóng</button>
+                         </div>
+                     </div>
+                 </div>
+             )}
         </div>
       );
   }
