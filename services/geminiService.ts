@@ -13,7 +13,7 @@ if (!apiKey || apiKey.length < 10) {
 const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_init" });
 const MODEL_NAME = "gemini-2.0-flash-lite-preview-02-05";
 
-// --- CACHE & RATE LIMITER (Keep existing) ---
+// --- CACHE & RATE LIMITER ---
 const CACHE_KEY = 'paperlingo_dictionary_cache_v8'; 
 let dictionaryCache = new Map<string, DictionaryResponse>();
 
@@ -40,7 +40,6 @@ const saveCacheToStorage = () => {
 };
 
 const checkRateLimit = (): boolean => {
-  // Simplified for brevity, assumes implementation exists
   return true; 
 };
 
@@ -58,7 +57,7 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, initialDelay = 10
   throw new Error("Max retries");
 }
 
-// UPDATE SCHEMA TO INCLUDE QUIZ
+// SCHEMA
 const lessonSchema: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -75,7 +74,6 @@ const lessonSchema: Schema = {
         required: ["term", "meaning"]
       }
     },
-    // NEW: Quiz Schema
     quiz: {
         type: Type.ARRAY,
         items: {
@@ -83,7 +81,7 @@ const lessonSchema: Schema = {
             properties: {
                 question: { type: Type.STRING },
                 options: { type: Type.ARRAY, items: { type: Type.STRING } },
-                correctAnswer: { type: Type.INTEGER, description: "Index 0, 1, or 2" },
+                correctAnswer: { type: Type.INTEGER },
                 explanation: { type: Type.STRING }
             },
             required: ["question", "options", "correctAnswer", "explanation"]
@@ -101,9 +99,8 @@ const getFallbackLesson = (text: string, translatedText?: string): LessonContent
     source: 'Fallback'
 });
 
-// DICTIONARY FUNCTIONS (Keep existing fetchVietnameseFallback, extractJSON, cleanShortMeaning)
+// DICTIONARY HELPER
 const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse> => {
-    // Keep existing implementation
     return { shortMeaning: "Đang tải...", phonetic: "", detailedExplanation: "..." };
 };
 const extractJSON = (text: string): any => {
@@ -114,16 +111,14 @@ const extractJSON = (text: string): any => {
         throw new Error("Invalid JSON");
     }
 };
-const cleanShortMeaning = (text: string): string => text.replace(/[\(\[].*?[\)\]]/g, '').trim();
 
-// UPDATED GENERATE FUNCTION
+// GENERATE LESSON
 export const generateLessonForChunk = async (textChunk: string, language: 'en' | 'zh' = 'en'): Promise<LessonContent> => {
   const isValidKey = apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init";
   
   if (isValidKey) {
       try {
           return await withRetry(async () => {
-            // PROMPT ENGINEERING BASED ON LANGUAGE
             let taskPrompt = "";
             
             if (language === 'zh') {
@@ -139,14 +134,30 @@ export const generateLessonForChunk = async (textChunk: string, language: 'en' |
                 `;
             } else {
                 taskPrompt = `
-                You are an academic English assistant.
+                ROLE: Strict Academic Content Filter & Editor.
                 INPUT TEXT (English): "${textChunk}"
 
+                YOUR PRIORITY MISSION: 
+                Clean the text. You must ONLY output content that belongs to the following sections:
+                - INTRODUCTION
+                - METHODS / METHODOLOGY
+                - RESULTS / FINDINGS
+                - DISCUSSION / CONCLUSION
+                
+                STRICTLY DELETE ANY CONTENT THAT IS:
+                - Abstract, Title, Keywords
+                - Author names, Affiliations, Emails
+                - Acknowledgements, Funding, Data Availability
+                - References / Bibliography
+                - Metadata, Journal Headers, Page numbers
+                
+                If the chunk consists ONLY of deleted content (e.g. it is just the Abstract or References), return an empty string for "cleanedSourceText".
+
                 TASKS:
-                1. "cleanedSourceText": Fix format/newlines. **CRITICAL: Remove any remaining publication metadata, dates, author lists, emails, copyright info, or 'Received/Accepted' lines if they appear in the text.** KEEP the core academic content in English.
-                2. "referenceTranslation": Translate to Vietnamese (Academic style).
+                1. "cleanedSourceText": The cleaned English text (Intro/Method/Result/Conclusion ONLY). Fix newlines.
+                2. "referenceTranslation": Translate the CLEANED text to Vietnamese (Academic style).
                 3. "keyTerms": Extract 3 difficult terms (English + Vietnamese).
-                4. "quiz": Generate 2 multiple choice questions (A, B, C) in Vietnamese to test comprehension of this chunk.
+                4. "quiz": Generate 2 multiple choice questions (A, B, C) in Vietnamese based on the CLEANED text.
                 `;
             }
 
@@ -199,8 +210,6 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
 
     const isValidKey = apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init";
 
-    // PROMPT DÀNH RIÊNG CHO TỪ ĐIỂN
-    // Yêu cầu: ShortMeaning chỉ là tiếng Việt, max 5-7 từ. DetailedExplanation bao gồm loại từ và ngữ cảnh.
     const prompt = `
     Role: Dictionary.
     Term: "${phrase}"
@@ -214,7 +223,6 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
     Return JSON.
     `;
     
-    // Schema đơn giản cho từ điển
     const dictSchema: Schema = {
         type: Type.OBJECT,
         properties: {
@@ -238,16 +246,13 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
             
             const raw = extractJSON(response.text || "{}");
             
-            // CLEANING LOGIC (Hậu xử lý để đảm bảo Tooltip sạch)
             let cleanShort = raw.shortMeaning || "";
-            // 1. Xóa nội dung trong ngoặc đơn/vuông
             cleanShort = cleanShort.replace(/[\(\[].*?[\)\]]/g, "");
-            // 2. Xóa các ký tự thừa
             cleanShort = cleanShort.trim();
 
             const result: DictionaryResponse = {
                 shortMeaning: cleanShort,
-                phonetic: (raw.phonetic || "").replace(/\//g, ''), // Xóa dấu / nếu AI tự thêm vì UI đã có
+                phonetic: (raw.phonetic || "").replace(/\//g, ''), 
                 detailedExplanation: raw.detailedExplanation || "",
                 originalTerm: phrase
             };

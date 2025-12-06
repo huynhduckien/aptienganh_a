@@ -15,7 +15,7 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           
-          // Join items with newline to preserve structure for header detection
+          // Join items with newline to preserve structure
           const pageText = textContent.items
             .map((item: any) => item.str)
             .join('\n');
@@ -23,9 +23,12 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
           fullText += pageText + '\n\n'; 
         }
 
-        // Apply cleaning (Generic)
+        // Apply cleaning
         let cleanedText = cleanIrrelevantContent(fullText);
         
+        // NEW: Aggressive Section Slicing (Keep only Intro -> Conclusion)
+        cleanedText = keepOnlyMainSections(cleanedText);
+
         resolve(cleanedText);
       } catch (error) {
         reject(error);
@@ -37,114 +40,160 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
   });
 };
 
-// Cleaner for metadata, headers, footers, and noise
-const cleanIrrelevantContent = (text: string): string => {
-  let cleaned = text;
+// NEW: Aggressive Slicer to cut off Title/Abstract/Authors
+const keepOnlyMainSections = (text: string): string => {
+    // 1. Identify start of Introduction
+    // Matches: "1. Introduction", "I. INTRODUCTION", "Introduction" (case insensitive) at start of line
+    const introRegex = /(?:^|\n)\s*(?:1\.?|I\.?)?\s*(?:INTRODUCTION|Introduction)\b/g;
+    let match = introRegex.exec(text);
+    
+    // If we find "Introduction", discard everything before it (Title, Abstract, Authors)
+    let startIndex = 0;
+    if (match) {
+        startIndex = match.index;
+    }
 
-  // 1. Remove specific Journal Metadata Lines (Received, Accepted, etc.)
-  // Matches: "Received 3 November 2023", "Available online...", "© 2024 Elsevier Ltd."
-  cleaned = cleaned.replace(/(?:Received|Accepted|Revised|Available online).*?\d{4}/gi, '');
-  cleaned = cleaned.replace(/©\s*\d{4}.*?(?:Elsevier|Springer|IEEE|Ltd|Inc)\.?/gi, '');
-  cleaned = cleaned.replace(/Copyright\s*©\s*\d{4}.*/gi, '');
+    // 2. Identify start of References (to cut off the end)
+    const refRegex = /(?:^|\n)\s*(?:REFERENCES|Bibliography|Literature Cited)\b/i;
+    let endMatch = text.match(refRegex);
+    let endIndex = text.length;
+    if (endMatch && endMatch.index) {
+        endIndex = endMatch.index;
+    }
 
-  // 2. Remove Author Info & Correspondence
-  // Matches: "* Corresponding author.", "E-mail address: ..."
-  cleaned = cleaned.replace(/^\*?\s*Corresponding author.*/gim, '');
-  cleaned = cleaned.replace(/(?:E-mail|Email)\s*address:?.*/gi, '');
-  
-  // 3. Remove CRediT Author Statement (Roles)
-  // Matches: "Name: Writing – review & editing, Methodology..."
-  cleaned = cleaned.replace(/^.*(?::|–)\s*(?:Writing|Supervision|Methodology|Investigation|Formal analysis|Conceptualization|Funding acquisition|Project administration).*$/gim, '');
+    // Slice the text
+    let coreContent = text.substring(startIndex, endIndex);
 
-  // 4. Remove Header/Footer Artifacts
-  cleaned = cleaned.replace(/(?:Contents lists available at|Hosted by)?\s*ScienceDirect/gi, '');
-  cleaned = cleaned.replace(/[a-zA-Z\s&]+\d+\s*\(\d{4}\)\s*[\d-]+/g, ''); // Journal Volume/Issue
-  cleaned = cleaned.replace(/\b\d{4}-\d{3}[\dX]\b/g, ''); // ISSN
-  cleaned = cleaned.replace(/^\s*.*?\)\.\s*$/gim, ''); // Artifacts ending in ).
-  cleaned = cleaned.replace(/^.*journal homepage:.*$/gim, '');
-  cleaned = cleaned.replace(/https?:\/\/[^\s]+/gi, ''); // URLs
-  cleaned = cleaned.replace(/doi:?\s*10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi, ''); // DOIs
-  cleaned = cleaned.replace(/[\w\.-]+@[\w\.-]+\.\w+/gi, ''); // Emails
-  
-  // 5. Remove Figure/Table Captions (Optional, but usually distracts from reading)
-  // cleaned = cleaned.replace(/^(?:Fig\.|Figure|Table)\s*\d+\.?.*$/gim, '');
+    // Safety check: If slicing removed too much (e.g. false positive), revert to full cleaned text
+    // Assuming a paper body should be at least 20% of the text or 1000 chars
+    if (coreContent.length < 500) {
+        return text.substring(0, endIndex); // Just cut references
+    }
 
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n'); // Normalize spacing
-
-  return cleaned;
+    return coreContent;
 };
 
-// Helper to filter specific academic sections
-const filterAcademicSections = (text: string): string => {
-  const sections = [
-    { name: 'Abstract', regex: /(?:^|\n)\s*(?:ABSTRACT|Abstract)\b/, action: 'keep' },
-    { name: 'Introduction', regex: /(?:^|\n)\s*(?:\d+\.|I\.|)\s*(?:INTRODUCTION|Introduction)\b/, action: 'keep' },
-    // Methods & Results are implicitly kept if we don't stop before them
-    { name: 'Conclusion', regex: /(?:^|\n)\s*(?:\d+\.|I\.|)\s*(?:CONCLUSION|Conclusions)\b/, action: 'keep' },
-    
-    // SECTIONS TO REMOVE (STOP READING)
-    { name: 'References', regex: /(?:^|\n)\s*(?:REFERENCES|Bibliography)\b/i, action: 'stop' },
-    { name: 'Acknowledgements', regex: /(?:^|\n)\s*(?:ACKNOWLEDGEMENTS|Acknowledgements)\b/i, action: 'stop' },
-    { name: 'Declaration', regex: /(?:^|\n)\s*(?:Declaration of|Competing interest|Conflict of interest)\b/i, action: 'stop' },
-    { name: 'Data Availability', regex: /(?:^|\n)\s*(?:Data availability|Data sharing)\b/i, action: 'stop' },
-    { name: 'Author Contributions', regex: /(?:^|\n)\s*(?:Author contributions|CRediT authorship)\b/i, action: 'stop' },
-    { name: 'Appendix', regex: /(?:^|\n)\s*(?:APPENDIX|Appendix)\b/i, action: 'stop' }
+// Cleaner for metadata, headers, footers, and noise
+const cleanIrrelevantContent = (text: string): string => {
+  let lines = text.split('\n');
+  const cleanedLines: string[] = [];
+
+  // 1. LINE-BASED FILTERING (Aggressive)
+  const garbageLinePatterns = [
+      // Dates & Submission Info
+      /Received\s+\d+/i,
+      /Accepted\s+\d+/i,
+      /Available\s+online/i,
+      /Revised\s+form/i,
+      /Published\s+online/i,
+      /Article\s+history/i,
+      
+      // Copyright & Journals & Publishers
+      /©\s*\d{4}/,
+      /Copyright/i,
+      /All\s+rights\s+reserved/i,
+      /Elsevier/i,
+      /ScienceDirect/i,
+      /Springer/i,
+      /IEEE/i,
+      /MDPI/i,
+      /Wiley/i,
+      /Taylor\s*&\s*Francis/i,
+      /Nature\s+Publishing/i,
+      /Volume\s+\d+/i,
+      /Issue\s+\d+/i,
+      /ISSN/i,
+      /https?:\/\//i,
+      /doi\.org/i,
+      /www\./i,
+      /http:/i,
+      
+      // Author Info & Correspondence
+      /Corresponding\s+author/i,
+      /E-?mail\s*:/i,
+      /Department\s+of/i,
+      /University/i,
+      /Institute/i,
+      /School\s+of/i,
+      /Tel\.:/i,
+      /Fax:/i,
+      /Ph\.\s?D\./i,
+      /M\.\s?Sc\./i,
+      
+      // CRediT Authorship & Declarations
+      /Writing\s?[–-]\s?review/i,
+      /Conceptualization/i,
+      /Formal\s+analysis/i,
+      /Funding\s+acquisition/i,
+      /Declaration\s+of\s+competing\s+interest/i,
+      /conflict\s+of\s+interest/i,
+      /Data\s+availability/i,
+      /Acknowledgements/i,
+      /APPENDIX/i,
+      /Author\s+contributions/i,
+      /Credit\s+authorship/i,
+      
+      // Misc Noise
+      /^Table\s+\d+/i, // Start of table
+      /^Fig\.\s+\d+/i, // Start of figure caption
+      /^Figure\s+\d+/i,
+      /Contents\s+lists\s+available/i,
+      /Journal\s+homepage/i,
+      /Page\s+\d+\s+of\s+\d+/i, // Page numbers
+      /ABSTRACT/i, // We want to remove Abstract based on user request
+      /Key\s?words/i
   ];
 
-  let matches: { index: number, action: string, name: string }[] = [];
-  sections.forEach(section => {
-    const match = text.match(section.regex);
-    if (match && match.index !== undefined) {
-      matches.push({ index: match.index, action: section.action, name: section.name });
-    }
-  });
+  for (let line of lines) {
+      line = line.trim();
+      
+      // Skip empty or very short lines (often page numbers or artifacts)
+      if (line.length < 4) continue;
 
-  matches.sort((a, b) => a.index - b.index);
+      // Check against garbage patterns
+      let isGarbage = false;
+      for (const pattern of garbageLinePatterns) {
+          if (pattern.test(line)) {
+              isGarbage = true;
+              break;
+          }
+      }
 
-  if (matches.length === 0) return text;
+      // Check for author lists (usually list of names with superscripts like 'a, b' or just names)
+      if (!isGarbage && line.length < 200 && line.includes(',')) {
+          const authorListScore = (line.match(/[A-Z][a-z]+/g) || []).length; 
+          const totalWords = line.split(/\s+/).length;
+          // If > 70% of words are capitalized and it doesn't end in '.', likely author list
+          if (authorListScore / totalWords > 0.7 && !line.endsWith('.')) {
+              isGarbage = true;
+          }
+      }
 
-  let finalContent = "";
-  
-  // If Abstract isn't the first detected section, keep the text before it (often Title/Authors) 
-  // ONLY if it's not super long garbage. For now, let's assume we start from the first detected 'keep' section.
-  
-  let processing = false;
-
-  // Case: No explicit start section found, assume start at 0? 
-  // Better: If Abstract is found, start there.
-  
-  const firstKeep = matches.find(m => m.action === 'keep');
-  if (firstKeep && firstKeep.index > 0) {
-      // Option: Include title text before abstract? 
-      // For language learning, Title is good. Let's keep from 0 if Abstract is the first match.
-      if (matches[0].name === 'Abstract') {
-          // Keep title area, but clean it heavily
-          let titleArea = text.substring(0, matches[0].index);
-          // Remove author names/affiliations usually found here if possible, or let AI clean it
-          finalContent += titleArea + "\n";
+      // If not garbage, keep it
+      if (!isGarbage) {
+          cleanedLines.push(line);
       }
   }
 
-  for (let i = 0; i < matches.length; i++) {
-    const current = matches[i];
-    
-    if (current.action === 'stop') {
-        // We stop everything here.
-        break;
-    }
+  // Join back
+  let cleaned = cleanedLines.join('\n');
 
-    if (current.action === 'keep') {
-      const nextIndex = (i + 1 < matches.length) ? matches[i+1].index : text.length;
-      let content = text.substring(current.index, nextIndex);
-      
-      // Remove the section header itself to make reading flow better? Or keep it?
-      // Let's keep it but formatted.
-      
-      finalContent += content.trim() + "\n\n";
-    }
-  }
+  // 2. INLINE CLEANING (Remove noise INSIDE sentences)
   
-  return finalContent.length > 100 ? finalContent : text;
+  // Remove Citations: [1], [1, 2], [1-3]
+  cleaned = cleaned.replace(/\[\s*\d+(?:\s*[,–-]\s*\d+)*\s*\]/g, '');
+  
+  // Remove Citations: (Smith, 2020) or (Smith et al., 2020)
+  cleaned = cleaned.replace(/\([A-Za-z\s\.,&]+,\s*\d{4}[a-z]?\)/g, '');
+
+  // Remove URLs and Emails within text
+  cleaned = cleaned.replace(/(?:https?|ftp):\/\/[\n\S]+/g, '');
+  cleaned = cleaned.replace(/\b[\w\.-]+@[\w\.-]+\.\w{2,4}\b/g, '');
+
+  // Normalize multiple newlines
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  return cleaned;
 };
 
 export type DifficultyLevel = 'medium' | 'hard';
@@ -153,11 +202,6 @@ export const chunkTextByLevel = (text: string, level: DifficultyLevel, language:
   
   // 1. ENGLISH LOGIC (Sentence based)
   if (language === 'en') {
-      // First, try to filter academic sections if it looks like an English paper
-      const filtered = filterAcademicSections(text);
-      // Fallback: If filtering removed too much, revert to cleaned text
-      const workingText = filtered.length > 300 ? filtered : text;
-
       let minSentences = 2;
       let maxSentences = 3; 
 
@@ -166,7 +210,10 @@ export const chunkTextByLevel = (text: string, level: DifficultyLevel, language:
         maxSentences = 6;
       }
 
-      const cleanText = workingText.replace(/\r\n/g, ' ').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+      // Remove extra newlines for chunking
+      const cleanText = text.replace(/\r\n/g, ' ').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+      
+      // Robust sentence splitting
       const sentenceRegex = /[^.!?]+[.!?]+(\s|$)/g;
       const rawSentences = cleanText.match(sentenceRegex) || [cleanText];
 
@@ -174,7 +221,10 @@ export const chunkTextByLevel = (text: string, level: DifficultyLevel, language:
       let currentChunk: string[] = [];
       
       for (const sentence of rawSentences) {
-        if (sentence.trim().length > 3) currentChunk.push(sentence.trim());
+        // Filter out garbage sentences that might have survived
+        if (sentence.length < 15 || /^\d+$/.test(sentence.trim()) || /Page\s+\d+/i.test(sentence)) continue;
+
+        currentChunk.push(sentence.trim());
 
         if (currentChunk.length >= maxSentences) {
           chunks.push(currentChunk.join(' '));
@@ -188,20 +238,15 @@ export const chunkTextByLevel = (text: string, level: DifficultyLevel, language:
   
   // 2. CHINESE LOGIC (Part based)
   else {
-      // Clean up extra spaces which are rare in Chinese, but normalize newlines
       const cleanText = text.replace(/\r\n/g, '\n').replace(/\n{2,}/g, '\n').trim();
       
-      // Determine number of parts
-      // Easy: 5-8 parts -> Random between 5 and 8
-      // Hard: 2-4 parts -> Random between 2 and 4
       let partsCount = 0;
-      if (level === 'medium') { // Easy in UI
+      if (level === 'medium') { 
           partsCount = Math.floor(Math.random() * (8 - 5 + 1)) + 5; 
-      } else { // Hard in UI
+      } else { 
           partsCount = Math.floor(Math.random() * (4 - 2 + 1)) + 2;
       }
 
-      // If text is too short, just return 1 chunk
       if (cleanText.length < 200) return [cleanText];
 
       const targetChunkSize = Math.ceil(cleanText.length / partsCount);
@@ -211,32 +256,23 @@ export const chunkTextByLevel = (text: string, level: DifficultyLevel, language:
       for (let i = 0; i < partsCount; i++) {
           if (startIndex >= cleanText.length) break;
 
-          // Ideal end index
           let endIndex = startIndex + targetChunkSize;
           
           if (i === partsCount - 1) {
-              // Last chunk takes the rest
               endIndex = cleanText.length;
           } else {
-              // Look for the nearest punctuation to split cleanly
-              // Punctuation: 。 ！ ？ \n
-              const searchWindow = 100; // Look ahead/behind 100 chars
+              const searchWindow = 100;
               const slice = cleanText.substring(Math.max(0, endIndex - searchWindow), Math.min(cleanText.length, endIndex + searchWindow));
               
-              // Find last punctuation in this window to split AFTER it
-              // Regex matches Chinese full stop, exclamation, question mark
               const puncRegex = /[。！？\n]/g;
               let match;
               let bestSplitOffset = -1;
 
               while ((match = puncRegex.exec(slice)) !== null) {
-                  // We want the split point closest to the middle of the window (which aligns with targetChunkSize)
-                  // But safely, let's just take the last one found in the window to fill the chunk as much as possible
                   bestSplitOffset = match.index;
               }
 
               if (bestSplitOffset !== -1) {
-                  // Absolute index in cleanText
                   endIndex = Math.max(0, endIndex - searchWindow) + bestSplitOffset + 1;
               }
           }
