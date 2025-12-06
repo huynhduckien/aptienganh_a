@@ -1,13 +1,12 @@
-
 import React, { useState, useEffect } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { LessonView } from './components/LessonView';
 import { Dashboard } from './components/Dashboard';
 import { chunkTextByLevel, DifficultyLevel } from './services/pdfService';
-import { ProcessedChunk, SavedPaper } from './types';
+import { ProcessedChunk, SavedPaper, Flashcard } from './types';
 import { saveFlashcard, getDueFlashcards } from './services/flashcardService';
 import { FlashcardReview } from './components/FlashcardReview';
-import { savePaperToDB, getAllPapersFromDB, updatePaperProgress, deletePaperFromDB } from './services/db';
+import { savePaperToDB, getAllPapersFromDB, updatePaperProgress, deletePaperFromDB, generateId } from './services/db';
 
 type AppState = 'dashboard' | 'upload' | 'level_select' | 'study';
 
@@ -24,11 +23,11 @@ const App: React.FC = () => {
 
   // Tools Data
   const [dictionary, setDictionary] = useState<{term: string, meaning: string, explanation: string, phonetic: string} | null>(null);
-  const [dueCardsCount, setDueCardsCount] = useState(0);
+  const [dueCards, setDueCards] = useState<Flashcard[]>([]);
   const [showFlashcards, setShowFlashcards] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'exists'>('idle');
 
-  // Load papers on init
+  // Load papers and flashcards on init
   useEffect(() => {
     loadPapers();
     updateDueCount();
@@ -40,18 +39,17 @@ const App: React.FC = () => {
     try {
         const savedPapers = await getAllPapersFromDB();
         setPapers(savedPapers);
-        // If no papers exist, go to upload, otherwise dashboard
         if (savedPapers.length === 0 && appState === 'dashboard') {
-            setAppState('dashboard'); // Stay on dashboard but show empty state
+            setAppState('dashboard'); 
         }
     } catch (e) {
         console.error("Failed to load papers", e);
     }
   };
 
-  const updateDueCount = () => {
-    const due = getDueFlashcards();
-    setDueCardsCount(due.length);
+  const updateDueCount = async () => {
+    const due = await getDueFlashcards();
+    setDueCards(due);
   };
 
   const handleTextExtracted = (text: string, name: string) => {
@@ -70,7 +68,7 @@ const App: React.FC = () => {
 
     // Create new paper object
     const newPaper: SavedPaper = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         fileName: fileName,
         originalText: rawText,
         processedChunks: initialChunks,
@@ -155,9 +153,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveFlashcard = () => {
+  const handleSaveFlashcard = async () => {
     if (!dictionary) return;
-    const success = saveFlashcard({
+    const success = await saveFlashcard({
       term: dictionary.term,
       meaning: dictionary.meaning,
       explanation: dictionary.explanation,
@@ -192,13 +190,13 @@ const App: React.FC = () => {
                         {fileName}
                      </div>
                  )}
-                 {dueCardsCount > 0 && (
+                 {dueCards.length > 0 && (
                     <button 
                       onClick={() => setShowFlashcards(true)}
                       className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 text-xs font-bold rounded-full hover:bg-red-100 transition-colors"
                     >
                        <span>Review</span>
-                       <span className="bg-red-500 text-white w-5 h-5 flex items-center justify-center rounded-full text-[10px]">{dueCardsCount}</span>
+                       <span className="bg-red-500 text-white w-5 h-5 flex items-center justify-center rounded-full text-[10px]">{dueCards.length}</span>
                     </button>
                  )}
             </div>
@@ -296,8 +294,8 @@ const App: React.FC = () => {
             <div className="hidden lg:block w-80 xl:w-96 sticky top-24 shrink-0 space-y-4">
                
                {/* Dictionary Card */}
-               {dictionary && (
-                   <div className="bg-white p-6 rounded-2xl border border-sky-100 shadow-[0_4px_20px_-4px_rgba(14,165,233,0.1)] relative animate-in slide-in-from-right duration-300 ring-1 ring-sky-500/10">
+               {dictionary ? (
+                   <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-[0_4px_20px_-4px_rgba(14,165,233,0.15)] relative animate-in slide-in-from-right duration-300 ring-1 ring-indigo-500/10 flex flex-col gap-6">
                         <button 
                             onClick={() => setDictionary(null)}
                             className="absolute top-3 right-3 text-slate-300 hover:text-slate-500 p-1 transition-colors"
@@ -305,45 +303,63 @@ const App: React.FC = () => {
                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                         </button>
                         
-                        <div className="flex flex-col gap-1 mb-4">
-                             <div className="flex items-center gap-2">
-                                <h3 className="font-serif text-2xl font-bold text-sky-700">{dictionary.term}</h3>
+                        {/* 1. TỪ VỰNG (Vocabulary) */}
+                        <div className="border-b border-slate-100 pb-4">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Từ vựng</span>
+                            <div className="flex items-baseline justify-between">
+                                <h3 className="font-serif text-3xl font-bold text-slate-900 break-words tracking-tight leading-tight">{dictionary.term}</h3>
                                 <button 
                                     onClick={() => playAudio(dictionary.term)}
-                                    className="text-slate-400 hover:text-sky-600 transition-colors p-1"
+                                    className="text-indigo-400 hover:text-indigo-600 transition-colors p-1"
+                                    title="Phát âm"
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
                                 </button>
-                             </div>
-                             {dictionary.phonetic && (
-                                <span className="text-sm font-mono text-slate-500">/{dictionary.phonetic}/</span>
-                             )}
+                            </div>
                         </div>
+
+                        {/* 2. PHIÊN ÂM (Phonetic) - Fix display */}
+                        {dictionary.phonetic && (
+                            <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Phiên âm</span>
+                                <div className="bg-slate-50 p-2 rounded-lg inline-block border border-slate-100">
+                                    <span className="text-lg font-mono text-slate-600 tracking-wide">
+                                        /{dictionary.phonetic}/
+                                    </span>
+                                </div>
+                            </div>
+                        )}
                         
-                        <div className="text-slate-800 font-medium mb-3">
-                            {dictionary.meaning}
-                        </div>
-                        <div className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100 mb-4">
-                            {dictionary.explanation}
+                        {/* 3. GIẢI THÍCH (Explanation) */}
+                        <div>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Giải thích</span>
+                            <div className="text-sm text-slate-700 leading-relaxed bg-indigo-50/50 p-4 rounded-xl border border-indigo-50 whitespace-pre-line">
+                                {dictionary.explanation}
+                            </div>
                         </div>
 
                         <button 
                             onClick={handleSaveFlashcard}
                             disabled={saveStatus !== 'idle'}
-                            className={`w-full py-2 rounded-lg text-sm font-semibold transition-all ${
+                            className={`w-full py-3 rounded-xl text-sm font-bold transition-all mt-2 shadow-sm ${
                                 saveStatus === 'saved' ? 'bg-green-100 text-green-700' :
                                 saveStatus === 'exists' ? 'bg-amber-50 text-amber-600' :
-                                'bg-sky-600 text-white hover:bg-sky-700 shadow-lg shadow-sky-200'
+                                'bg-slate-900 text-white hover:bg-slate-800'
                             }`}
                         >
                             {saveStatus === 'saved' ? 'Đã lưu thành công' : 
                              saveStatus === 'exists' ? 'Từ này đã có' : 'Lưu vào Flashcard'}
                         </button>
                    </div>
+               ) : (
+                   <div className="bg-white/50 border border-dashed border-slate-300 rounded-2xl p-8 flex flex-col items-center justify-center text-center h-[300px] text-slate-400">
+                       <span className="text-4xl mb-3 opacity-50">👆</span>
+                       <p className="text-sm font-medium">Bôi đen bất kỳ từ nào trong bài đọc<br/>để xem giải thích chi tiết tại đây.</p>
+                   </div>
                )}
 
                {/* Navigation Grid */}
-               <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col max-h-[60vh]">
+               <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col max-h-[50vh]">
                   <div className="flex items-center justify-between mb-4">
                       <span className="text-xs font-bold text-slate-400 uppercase">Mục lục</span>
                       <div className="text-xs font-medium text-slate-500">{chunks.filter(c=>c.isCompleted).length}/{chunks.length} hoàn thành</div>
@@ -375,7 +391,7 @@ const App: React.FC = () => {
       {/* FLASHCARD MODAL */}
       {showFlashcards && (
         <FlashcardReview 
-            cards={getDueFlashcards()} 
+            cards={dueCards} 
             onClose={() => setShowFlashcards(false)}
             onUpdate={updateDueCount}
         />

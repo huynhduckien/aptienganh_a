@@ -25,9 +25,9 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: initial
     window.speechSynthesis.speak(utterance);
   };
 
-  const handleRate = (remembered: boolean) => {
+  const handleRate = async (remembered: boolean) => {
     const currentCard = queue[currentIndex];
-    updateCardStatus(currentCard.id, remembered);
+    await updateCardStatus(currentCard.id, remembered);
     
     // Move to next
     if (currentIndex < queue.length - 1) {

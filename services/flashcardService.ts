@@ -1,20 +1,17 @@
-
 import { Flashcard } from "../types";
+import { getFlashcardsFromDB, saveFlashcardToDB, generateId } from "./db";
 
-const STORAGE_KEY = 'paperlingo_flashcards';
-
-export const getFlashcards = (): Flashcard[] => {
+export const getFlashcards = async (): Promise<Flashcard[]> => {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
+    return await getFlashcardsFromDB();
   } catch (e) {
     console.warn("Failed to load flashcards", e);
     return [];
   }
 };
 
-export const saveFlashcard = (card: Omit<Flashcard, 'id' | 'level' | 'nextReview' | 'createdAt'>): boolean => {
-  const cards = getFlashcards();
+export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'nextReview' | 'createdAt'>): Promise<boolean> => {
+  const cards = await getFlashcards();
   
   // Check for duplicates
   if (cards.some(c => c.term.toLowerCase() === card.term.toLowerCase())) {
@@ -23,24 +20,24 @@ export const saveFlashcard = (card: Omit<Flashcard, 'id' | 'level' | 'nextReview
 
   const newCard: Flashcard = {
     ...card,
-    id: crypto.randomUUID(),
+    id: generateId(),
     level: 0,
     nextReview: Date.now(), // Ready immediately
     createdAt: Date.now()
   };
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...cards, newCard]));
+  await saveFlashcardToDB(newCard);
   return true;
 };
 
-export const getDueFlashcards = (): Flashcard[] => {
-  const cards = getFlashcards();
+export const getDueFlashcards = async (): Promise<Flashcard[]> => {
+  const cards = await getFlashcards();
   const now = Date.now();
   return cards.filter(card => card.nextReview <= now);
 };
 
-export const updateCardStatus = (cardId: string, remembered: boolean) => {
-  const cards = getFlashcards();
+export const updateCardStatus = async (cardId: string, remembered: boolean): Promise<void> => {
+  const cards = await getFlashcards();
   const index = cards.findIndex(c => c.id === cardId);
   
   if (index === -1) return;
@@ -50,20 +47,20 @@ export const updateCardStatus = (cardId: string, remembered: boolean) => {
   let newLevel = card.level;
 
   if (remembered) {
-    // Spaced Repetition Logic
+    // Spaced Repetition Logic (SuperMemo 2 simplified)
     newLevel = card.level + 1;
     switch (newLevel) {
-      case 1: nextReview += 24 * 60 * 60 * 1000; break; 
-      case 2: nextReview += 3 * 24 * 60 * 60 * 1000; break; 
-      case 3: nextReview += 7 * 24 * 60 * 60 * 1000; break; 
-      case 4: nextReview += 14 * 24 * 60 * 60 * 1000; break; 
-      default: nextReview += 30 * 24 * 60 * 60 * 1000; break; 
+      case 1: nextReview += 24 * 60 * 60 * 1000; break; // 1 day
+      case 2: nextReview += 3 * 24 * 60 * 60 * 1000; break; // 3 days
+      case 3: nextReview += 7 * 24 * 60 * 60 * 1000; break; // 1 week
+      case 4: nextReview += 14 * 24 * 60 * 60 * 1000; break; // 2 weeks
+      default: nextReview += 30 * 24 * 60 * 60 * 1000; break; // 1 month
     }
   } else {
     newLevel = 0;
-    nextReview += 10 * 60 * 1000; 
+    nextReview += 10 * 60 * 1000; // 10 minutes
   }
 
-  cards[index] = { ...card, level: newLevel, nextReview };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+  const updatedCard = { ...card, level: newLevel, nextReview };
+  await saveFlashcardToDB(updatedCard);
 };

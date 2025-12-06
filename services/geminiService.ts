@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { LessonContent } from "../types";
 import { translateTextFallback } from "./translationService";
@@ -17,7 +16,7 @@ const ai = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash_on_in
 const MODEL_NAME = "gemini-2.0-flash-lite-preview-02-05";
 
 // --- PERSISTENT CACHE ---
-const CACHE_KEY = 'paperlingo_dictionary_cache_v1';
+const CACHE_KEY = 'paperlingo_dictionary_cache_v8'; 
 const loadCache = (): Map<string, DictionaryResponse> => {
     try {
         const stored = localStorage.getItem(CACHE_KEY);
@@ -41,7 +40,7 @@ const saveCacheToStorage = () => {
 };
 
 // --- RATE LIMITER CONFIGURATION ---
-const MAX_REQUESTS_PER_MINUTE = 12;
+const MAX_REQUESTS_PER_MINUTE = 15;
 const requestTimestamps: number[] = [];
 
 const checkRateLimit = (): boolean => {
@@ -116,10 +115,11 @@ const getFallbackLesson = (text: string, translatedText?: string): LessonContent
     source: 'Fallback'
 });
 
-// IMPROVED FALLBACK: Better Phonetic Extraction
+// IMPROVED FALLBACK
 const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse> => {
     let phonetic = "";
     let definitionEN = "";
+    let partOfSpeech = "";
 
     try {
         const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(term)}`);
@@ -127,21 +127,27 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
             const data = await response.json();
             const firstEntry = data[0];
             
-            // Logic lấy phiên âm thông minh hơn
+            // Phonetic Logic: Prioritize ones with audio or text
             if (firstEntry.phonetics && Array.isArray(firstEntry.phonetics)) {
-                // Ưu tiên cái nào có text và audio, hoặc ít nhất là text
-                const validPhonetic = firstEntry.phonetics.find((p: any) => p.text && p.text.trim() !== "");
-                if (validPhonetic) {
-                    phonetic = validPhonetic.text;
-                } else if (firstEntry.phonetic) {
-                    phonetic = firstEntry.phonetic;
-                }
+                // Find one that looks like IPA (has slashes)
+                const ipa = firstEntry.phonetics.find((p: any) => p.text && p.text.includes('/'));
+                const anyP = firstEntry.phonetics.find((p: any) => p.text);
+                
+                phonetic = ipa?.text || anyP?.text || "";
+            }
+            if (!phonetic && firstEntry.phonetic) {
+                phonetic = firstEntry.phonetic;
             }
             
-            // Làm sạch dấu ngoặc nếu có (để hiển thị thống nhất)
-            phonetic = phonetic.replace(/^[/\[]/, '').replace(/[/\]]$/, '');
+            // Clean phonetic: Remove existing slashes so UI can add them consistently
+            if (phonetic) {
+                phonetic = phonetic.replace(/^[\/\[]/, '').replace(/[\/\]]$/, '');
+            }
 
-            definitionEN = firstEntry.meanings[0]?.definitions[0]?.definition || "";
+            if (firstEntry.meanings && firstEntry.meanings.length > 0) {
+                partOfSpeech = firstEntry.meanings[0].partOfSpeech || "";
+                definitionEN = firstEntry.meanings[0].definitions[0]?.definition || "";
+            }
         }
     } catch (e) { 
         console.warn("Dictionary API failed", e);
@@ -151,23 +157,61 @@ const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse
     try {
         vietnameseMeaning = await translateTextFallback(term);
     } catch (e) {
-        vietnameseMeaning = "Lỗi dịch";
+        vietnameseMeaning = "Đang tải...";
     }
+
+    const explanation = partOfSpeech 
+        ? `(${partOfSpeech}) ${definitionEN}` 
+        : `Dịch máy: ${vietnameseMeaning}`;
 
     return {
         shortMeaning: vietnameseMeaning,
-        phonetic: phonetic, // Trả về dạng text thô (ví dụ: "həˈləʊ"), UI sẽ tự thêm dấu /.../
-        detailedExplanation: `[Chế độ Dịch máy]\n\nNghĩa tiếng Việt: ${vietnameseMeaning}\n\n${definitionEN ? `Định nghĩa gốc (EN): ${definitionEN}` : ""}`
+        phonetic: phonetic, 
+        detailedExplanation: explanation
     };
 };
 
-const getFallbackDictionary = (term: string, reason: 'quota' | 'rate_limit' = 'quota'): DictionaryResponse => ({
-    shortMeaning: reason === 'rate_limit' ? "Đợi 1 chút..." : "Lỗi Quota",
-    phonetic: "...",
-    detailedExplanation: reason === 'rate_limit' 
-        ? "Bạn đang tra quá nhanh. Vui lòng đợi 30 giây." 
-        : "AI đang bị quá tải (Hết lượt miễn phí). Vui lòng thử lại sau 1 phút hoặc nhập API Key mới."
-});
+// Helper to reliably extract JSON
+const extractJSON = (text: string): any => {
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match) {
+            try {
+                return JSON.parse(match[0]);
+            } catch (e2) {
+                console.error("Failed to parse extracted JSON block", e2);
+            }
+        }
+        throw new Error("Invalid JSON format");
+    }
+};
+
+// Aggressive cleaner for Tooltip (Short Meaning)
+// STRICTLY removes brackets but ALLOWS longer text for accuracy
+const cleanShortMeaning = (text: string): string => {
+    let cleaned = text;
+    
+    // 1. Remove anything inside round brackets (...) or square brackets [...]
+    // This removes parts of speech like (noun) or notes
+    cleaned = cleaned.replace(/[\(\[].*?[\)\]]/g, '');
+    
+    // 2. Remove common prefixes/suffixes AI adds
+    cleaned = cleaned.replace(/^nghĩa là\s+/i, '');
+    cleaned = cleaned.replace(/^là\s+/i, '');
+
+    // 3. We NO LONGER split by commas to allow synonyms or full phrases.
+    // But we still split by semicolon if AI gives multiple distinct definitions.
+    cleaned = cleaned.split(/[;]/)[0];
+    
+    // 4. Trim spaces
+    cleaned = cleaned.trim();
+    
+    // REMOVED 5-word limit to ensure accuracy
+    
+    return cleaned;
+};
 
 export const generateLessonForChunk = async (textChunk: string): Promise<LessonContent> => {
   const isValidKey = apiKey && apiKey.length > 10 && apiKey !== "dummy_key_to_prevent_crash_on_init";
@@ -192,16 +236,12 @@ export const generateLessonForChunk = async (textChunk: string): Promise<LessonC
                 },
             });
 
-            let jsonText = response.text;
-            if (!jsonText) throw new Error("No data returned");
-            jsonText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
-
-            const data = JSON.parse(jsonText) as LessonContent;
+            const data = extractJSON(response.text || "{}") as LessonContent;
             data.source = 'AI';
             return data;
           });
       } catch (error: any) {
-          console.warn("AI Failed (Quota or Error). Switching to Fallback.", error.message);
+          console.warn("AI Failed. Switching to Fallback.", error.message);
       }
   }
 
@@ -223,36 +263,56 @@ export const explainPhrase = async (phrase: string, fullContext: string): Promis
     const cacheKey = phrase.trim().toLowerCase();
     if (dictionaryCache.has(cacheKey)) return dictionaryCache.get(cacheKey)!;
 
-    if (!checkRateLimit()) {
-         try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'rate_limit'); }
-    }
-
-    if (!apiKey || apiKey.length < 10) {
-        try { return await fetchVietnameseFallback(phrase); } catch { return getFallbackDictionary(phrase, 'quota'); }
+    // Fast fail to fallback if rate limit or no key
+    if (!checkRateLimit() || !apiKey || apiKey.length < 10) {
+         return await fetchVietnameseFallback(phrase);
     }
 
     try {
         const result = await withRetry(async () => {
             const response = await ai.models.generateContent({
                 model: MODEL_NAME,
-                contents: `Define "${phrase}" in Vietnamese (context: "${fullContext}"). JSON: shortMeaning, phonetic (IPA), detailedExplanation.`,
-                config: { responseMimeType: "application/json", responseSchema: { type: Type.OBJECT, properties: { shortMeaning: {type:Type.STRING}, phonetic: {type:Type.STRING}, detailedExplanation: {type:Type.STRING}}}}
+                contents: `
+                Act as a Dictionary for an Academic English learner.
+                Term: "${phrase}"
+                Context: "${fullContext}"
+                
+                OUTPUT JSON ONLY with this exact structure:
+                {
+                  "shortMeaning": "TRANSLATE term to Vietnamese accurately. Keep it concise but ensure the FULL meaning is conveyed. NO brackets. NO parts of speech. NO explanations.",
+                  "phonetic": "IPA format (JUST text, e.g. wɜːrd, NO slashes)",
+                  "detailedExplanation": "Explain the meaning and usage in this context in Vietnamese. You can include part of speech and detailed nuance here."
+                }
+                `,
+                config: { 
+                    responseMimeType: "application/json", 
+                    responseSchema: { 
+                        type: Type.OBJECT, 
+                        properties: { 
+                            shortMeaning: {type:Type.STRING}, 
+                            phonetic: {type:Type.STRING}, 
+                            detailedExplanation: {type:Type.STRING}
+                        },
+                        required: ["shortMeaning", "phonetic", "detailedExplanation"]
+                    }
+                }
             });
-            let text = response.text || "";
-            text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-            if (text) return JSON.parse(text) as DictionaryResponse;
-            throw new Error("Empty");
+            
+            return extractJSON(response.text || "{}") as DictionaryResponse;
         }, 1, 1000); 
+        
+        // Aggressive cleaning
+        result.shortMeaning = cleanShortMeaning(result.shortMeaning);
+        // Ensure phonetic has no slashes (so UI can add them)
+        if (result.phonetic) {
+            result.phonetic = result.phonetic.replace(/^[\/\[]/, '').replace(/[\/\]]$/, '');
+        }
         
         dictionaryCache.set(cacheKey, result);
         saveCacheToStorage();
         return result;
 
     } catch (error) {
-        try {
-            return await fetchVietnameseFallback(phrase);
-        } catch (e) {
-             return getFallbackDictionary(phrase, 'quota');
-        }
+        return await fetchVietnameseFallback(phrase);
     }
 }

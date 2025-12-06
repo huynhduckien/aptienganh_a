@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ProcessedChunk } from '../types';
 import { generateLessonForChunk, explainPhrase } from '../services/geminiService';
@@ -18,8 +17,7 @@ interface SelectionState {
     left: number;
     show: boolean;
     loading: boolean;
-    result?: string; // Store the short meaning here
-    phonetic?: string;
+    result?: string; // Only the short meaning
 }
 
 export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onComplete, onNext, onLookup, isLast }) => {
@@ -56,7 +54,6 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
     } else {
       fetchAIContent();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chunk.id]);
 
   const fetchAIContent = async () => {
@@ -67,21 +64,9 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       setLessonData(data);
     } catch (e: any) {
       console.error(e);
-      // Fallback handling is now done inside generateLessonForChunk, 
-      // but if something catastrophic happens:
       setError("Lỗi kết nối nghiêm trọng. Vui lòng tải lại trang.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const playAudio = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.9;
-      window.speechSynthesis.speak(utterance);
     }
   };
 
@@ -98,8 +83,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       const text = winSelection.toString().trim();
       const wordCount = text.split(/\s+/).length;
 
-      // Allow lookup if 1-6 words
-      if (text.length > 0 && wordCount <= 6) {
+      // Allow lookup if 1-12 words
+      if (text.length > 0 && wordCount <= 12) {
           const range = winSelection.getRangeAt(0);
           const rect = range.getBoundingClientRect();
           const containerRect = textContainerRef.current?.getBoundingClientRect();
@@ -108,7 +93,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
             // Auto trigger lookup
             setSelection({
                 text,
-                top: rect.top - containerRect.top - 15, // Just above the text with a bit more offset
+                top: rect.top - containerRect.top - 15,
                 left: rect.left - containerRect.left + (rect.width / 2),
                 show: true,
                 loading: true,
@@ -125,12 +110,14 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
           const context = lessonData?.cleanedSourceText || chunk.text;
           const result = await explainPhrase(text, context);
           
-          // Send detailed info to parent (Sidebar)
+          // STRICTLY send data to parent (Sidebar)
+          // Sidebar will display: Term, Phonetic, Explanation (which contains the detailed info)
           onLookup(text, result.shortMeaning, result.detailedExplanation, result.phonetic);
           
+          // Tooltip ONLY shows shortMeaning
           setSelection(prev => {
               if (prev.text === text && prev.show) {
-                  return { ...prev, loading: false, result: result.shortMeaning, phonetic: result.phonetic };
+                  return { ...prev, loading: false, result: result.shortMeaning };
               }
               return prev;
           });
@@ -146,7 +133,6 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
 
   // --- Comparison Logic ---
   const calculateSimilarity = (str1: string, str2: string) => {
-      // Improved tokenizer for Vietnamese
       const normalize = (s: string) => s.toLowerCase()
         .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "")
         .replace(/\s+/g, " ")
@@ -163,10 +149,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       
       if (union.size === 0) return 0;
       
-      // Jaccard Index
       let score = (intersection.size / union.size) * 100;
-      
-      // Bonus for almost matching
       if (score > 80) score = 100;
       
       return Math.round(score);
@@ -186,7 +169,6 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       }
   };
 
-  // Determine if we are in fallback mode based on the 'source' flag or absence of keyTerms
   const isFallbackMode = lessonData?.source === 'Fallback' || (!lessonData?.source && lessonData?.keyTerms?.length === 0);
 
   if (loading) {
@@ -194,7 +176,6 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
       <div className="flex flex-col items-center justify-center h-96 space-y-4 bg-white rounded-2xl border border-slate-200">
         <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
         <p className="text-slate-500 font-medium">Đang chuẩn bị bài dịch...</p>
-        <p className="text-xs text-slate-400">Đang kết nối với AI (hoặc dịch dự phòng)...</p>
       </div>
     );
   }
@@ -226,10 +207,9 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                 <span className="text-2xl">📖</span>
                 <h2 className="text-lg font-bold text-slate-800">Phần đọc (Reading)</h2>
             </div>
-            {/* Indicator */}
             {isFallbackMode ? (
                  <div className="text-xs text-amber-700 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-200 flex items-center gap-1 cursor-help" title="AI bị quá tải, đang dùng Google Dịch">
-                    <span>⚠️</span> Chế độ dự phòng (AI Overload)
+                    <span>⚠️</span> Chế độ dự phòng
                 </div>
             ) : (
                 <div className="text-xs text-indigo-700 font-bold bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200 flex items-center gap-1">
@@ -254,38 +234,25 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                     </p>
                 </div>
 
-                {/* Selection Popover */}
+                {/* Selection Tooltip - MINIMALIST BUT ALLOWS ACCURATE MEANING */}
                 {selection.show && (
                     <div 
                         className="absolute z-50 transform -translate-x-1/2 -translate-y-full transition-all duration-200"
                         style={{ top: selection.top, left: selection.left }}
                     >
                         {selection.loading ? (
-                             <div className="mb-2 bg-slate-800 text-white px-4 py-2 rounded-full shadow-xl flex items-center space-x-2 border border-slate-700">
-                                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
-                                <span className="text-sm font-medium whitespace-nowrap">Đang tra...</span>
+                             <div className="mb-2 bg-slate-900 text-white px-3 py-1.5 rounded-full shadow-xl flex items-center space-x-2 border border-slate-700">
+                                <div className="animate-spin h-2 w-2 border-2 border-white border-t-transparent rounded-full"></div>
                             </div>
                         ) : selection.result ? (
-                            <div className="mb-2 max-w-sm w-max animate-in fade-in zoom-in-95 duration-200">
-                                <div className="bg-white text-slate-800 px-5 py-3 rounded-2xl shadow-xl border-2 border-green-400 relative flex items-start gap-3">
-                                    <div className="flex-1">
-                                        <div className="font-bold text-lg text-green-700 mb-0.5">{selection.result}</div>
-                                        <div className="text-xs text-slate-400 font-bold tracking-wider border-t border-slate-100 pt-1 mt-1 flex items-center gap-1">
-                                            {selection.text}
-                                            {selection.phonetic && <span className="text-slate-400 font-normal normal-case">/{selection.phonetic}/</span>}
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); playAudio(selection.text); }}
-                                                className="ml-1 text-slate-400 hover:text-green-600 p-0.5 rounded-full hover:bg-green-50 transition-colors"
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318 0-2.402.933l-.034 6.911c.088 1.126 1.449 1.156 2.451 1.156H6.44l4.5 4.5c.945.945 2.56.276 2.56-1.06V4.06zM17.786 7.158c.391-.391 1.024-.391 1.414 0 2.228 2.229 2.228 5.842 0 8.071-.39.39-1.023.39-1.414 0-.39-.39-.39-1.023 0-1.414 1.447-1.447 1.447-3.793 0-5.24-.391-.391-.391-1.024 0-1.414z" /></svg>
-                                            </button>
-                                        </div>
+                            <div className="mb-2 w-max max-w-[280px] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
+                                <div className="bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl border border-slate-700 relative text-center">
+                                    {/* Display ONLY the shortMeaning */}
+                                    <div className="font-bold text-sm leading-snug break-words whitespace-normal">
+                                        {selection.result}
                                     </div>
-                                    <button onClick={closeSelection} className="text-slate-300 hover:text-slate-500 -mr-2 -mt-2 p-1">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" /></svg>
-                                    </button>
                                 </div>
-                                <div className="absolute left-1/2 -translate-x-1/2 -bottom-2.5 w-5 h-5 bg-white border-r-2 border-b-2 border-green-400 transform rotate-45"></div>
+                                <div className="absolute left-1/2 -translate-x-1/2 -bottom-1.5 w-3 h-3 bg-slate-900 transform rotate-45 border-r border-b border-slate-700"></div>
                             </div>
                         ) : null}
                     </div>
@@ -332,7 +299,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                     <div className="bg-green-50/50 border border-green-200 rounded-xl p-8 relative">
                         {isFallbackMode && (
                              <div className="absolute top-4 right-4 text-[10px] font-bold text-white bg-amber-500 px-2 py-0.5 rounded uppercase tracking-wider">
-                                Chế độ dự phòng (AI quá tải)
+                                Chế độ dự phòng
                              </div>
                         )}
                         <h4 className="text-xs font-bold text-green-700 uppercase tracking-wider mb-4">Đáp án tham khảo</h4>
@@ -340,21 +307,6 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, totalChunks, onCo
                             {lessonData.referenceTranslation}
                         </p>
                     </div>
-
-                    {/* Key Terms (Only show if AI provided them) */}
-                    {lessonData.keyTerms && lessonData.keyTerms.length > 0 && (
-                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-6">
-                            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Từ vựng quan trọng</h4>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                {lessonData.keyTerms.map((item, idx) => (
-                                    <div key={idx} className="bg-white p-4 rounded-lg border border-slate-100 text-base shadow-sm">
-                                        <div className="font-bold text-indigo-700 mb-1">{item.term}</div>
-                                        <div className="text-slate-600 leading-relaxed">{item.meaning}</div>
-                                    </div>
-                                ))}
-                            </div>
-                         </div>
-                    )}
 
                     <div className="flex gap-4 pt-4">
                          <button 
