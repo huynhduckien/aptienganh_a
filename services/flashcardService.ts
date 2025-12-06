@@ -104,6 +104,122 @@ export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'next
   return true;
 };
 
+// --- IMPORT GOOGLE SHEET LOGIC ---
+
+// Helper để parse CSV (xử lý cả dấu phẩy trong ngoặc kép)
+const parseCSV = (text: string): string[][] => {
+    const rows: string[][] = [];
+    let currentRow: string[] = [];
+    let currentCell = '';
+    let insideQuotes = false;
+
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const nextChar = text[i + 1];
+
+        if (char === '"') {
+            if (insideQuotes && nextChar === '"') {
+                currentCell += '"'; // Escape double quotes
+                i++;
+            } else {
+                insideQuotes = !insideQuotes;
+            }
+        } else if (char === ',' && !insideQuotes) {
+            currentRow.push(currentCell.trim());
+            currentCell = '';
+        } else if ((char === '\r' || char === '\n') && !insideQuotes) {
+            if (char === '\r' && nextChar === '\n') i++;
+            if (currentCell || currentRow.length > 0) {
+                currentRow.push(currentCell.trim());
+                rows.push(currentRow);
+                currentRow = [];
+                currentCell = '';
+            }
+        } else {
+            currentCell += char;
+        }
+    }
+    if (currentCell || currentRow.length > 0) {
+        currentRow.push(currentCell.trim());
+        rows.push(currentRow);
+    }
+    return rows;
+};
+
+export const importFlashcardsFromSheet = async (sheetUrl: string): Promise<{ added: number, total: number, error?: string }> => {
+    try {
+        // 1. Extract Spreadsheet ID
+        // Regex supports: /d/ID/edit, /d/ID/copy, etc.
+        const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+        if (!match || !match[1]) {
+            return { added: 0, total: 0, error: "Link Google Sheet không hợp lệ." };
+        }
+        const spreadsheetId = match[1];
+
+        // 2. Fetch CSV Data
+        const csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`;
+        const response = await fetch(csvUrl);
+        
+        if (!response.ok) {
+            return { added: 0, total: 0, error: "Không thể đọc dữ liệu. Hãy chắc chắn bạn đã CHIA SẺ file ở chế độ 'Bất kỳ ai có đường liên kết'." };
+        }
+
+        const csvText = await response.text();
+        const rows = parseCSV(csvText);
+
+        if (rows.length < 2) {
+             return { added: 0, total: 0, error: "File không có dữ liệu hoặc sai định dạng." };
+        }
+
+        // 3. Map Columns
+        // Expected: Từ | Pinyin | Từ Loại | Nghĩa của từ
+        const header = rows[0].map(h => h.toLowerCase());
+        
+        const idxTerm = header.findIndex(h => h.includes('từ') && !h.includes('nghĩa') && !h.includes('loại'));
+        const idxPhonetic = header.findIndex(h => h.includes('pinyin') || h.includes('phiên âm') || h.includes('ipa'));
+        const idxType = header.findIndex(h => h.includes('từ loại') || h.includes('pos') || h.includes('part of'));
+        const idxMeaning = header.findIndex(h => h.includes('nghĩa') || h.includes('meaning'));
+
+        if (idxTerm === -1 || idxMeaning === -1) {
+             return { added: 0, total: 0, error: "Không tìm thấy cột 'Từ' hoặc 'Nghĩa của từ'. Vui lòng kiểm tra lại tiêu đề cột." };
+        }
+
+        let addedCount = 0;
+        let processedCount = 0;
+
+        // 4. Process Rows
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (row.length <= idxTerm) continue;
+
+            const term = row[idxTerm];
+            const meaning = row[idxMeaning] || "";
+            const phonetic = idxPhonetic !== -1 ? row[idxPhonetic] : "";
+            const type = idxType !== -1 ? row[idxType] : "";
+            
+            // Nếu cột Từ Loại có dữ liệu, thêm vào phần giải thích
+            const explanation = type ? `(${type})` : "";
+
+            if (term && meaning) {
+                processedCount++;
+                const success = await saveFlashcard({
+                    term,
+                    meaning,
+                    phonetic,
+                    explanation
+                });
+                if (success) addedCount++;
+            }
+        }
+
+        return { added: addedCount, total: processedCount };
+
+    } catch (e) {
+        console.error("Import failed", e);
+        return { added: 0, total: 0, error: "Lỗi không xác định khi import." };
+    }
+};
+
 // --- DAILY LIMIT & SETTINGS ---
 
 const STORAGE_KEY_LIMIT = 'paperlingo_daily_limit';

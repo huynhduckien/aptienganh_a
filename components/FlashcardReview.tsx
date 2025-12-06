@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Flashcard, ReviewRating, AnkiStats } from '../types';
-import { updateCardStatus, getAnkiStats, setDailyLimit } from '../services/flashcardService';
+import { updateCardStatus, getAnkiStats, setDailyLimit, importFlashcardsFromSheet } from '../services/flashcardService';
 
 interface FlashcardReviewProps {
   cards: Flashcard[]; // These are the DUE cards
@@ -21,6 +21,12 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   const [isEditingLimit, setIsEditingLimit] = useState(false);
   const [tempLimit, setTempLimit] = useState('50');
 
+  // Import State
+  const [showImport, setShowImport] = useState(false);
+  const [importUrl, setImportUrl] = useState('');
+  const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [importMsg, setImportMsg] = useState('');
+
   // Chart Filters
   const [forecastRange, setForecastRange] = useState<'1m' | '3m'>('1m');
 
@@ -32,7 +38,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
   const refreshStats = async () => {
       const s = await getAnkiStats();
       setStats(s);
-      setTempLimit(s.today.limit.toString());
+      if(s) setTempLimit(s.today.limit.toString());
   };
 
   const playAudio = (text: string) => {
@@ -64,6 +70,25 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
           setIsEditingLimit(false);
           refreshStats();
           onUpdate(); // Re-fetch due cards
+      }
+  };
+
+  const handleImportSheet = async () => {
+      if (!importUrl) return;
+      setImportStatus('loading');
+      setImportMsg('Đang tải dữ liệu...');
+      
+      const result = await importFlashcardsFromSheet(importUrl);
+      
+      if (result.error) {
+          setImportStatus('error');
+          setImportMsg(result.error);
+      } else {
+          setImportStatus('success');
+          setImportMsg(`Thành công! Đã thêm ${result.added} thẻ mới (Tổng: ${result.total}).`);
+          setImportUrl('');
+          refreshStats();
+          onUpdate();
       }
   };
 
@@ -245,26 +270,67 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCard
                              </div>
                          </div>
 
-                         {/* CARD: SETTINGS */}
-                         <div className="md:col-span-2 bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-between items-center">
-                             <span className="text-sm font-bold text-slate-600">Giới hạn học mỗi ngày</span>
-                             <div className="flex items-center gap-2">
-                                 {isEditingLimit ? (
-                                     <>
+                         {/* CARD: SETTINGS & IMPORT */}
+                         <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-between items-center">
+                                <span className="text-sm font-bold text-slate-600">Giới hạn học mỗi ngày</span>
+                                <div className="flex items-center gap-2">
+                                    {isEditingLimit ? (
+                                        <>
+                                            <input 
+                                                type="number" 
+                                                value={tempLimit} 
+                                                onChange={(e) => setTempLimit(e.target.value)}
+                                                className="w-20 px-2 py-1 border rounded"
+                                            />
+                                            <button onClick={handleSaveLimit} className="text-green-600 font-bold text-sm">Lưu</button>
+                                        </>
+                                    ) : (
+                                        <button onClick={() => setIsEditingLimit(true)} className="text-indigo-600 font-bold hover:underline">
+                                            {stats.today.limit} thẻ / ngày ✏️
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                {!showImport ? (
+                                    <button 
+                                        onClick={() => setShowImport(true)}
+                                        className="w-full flex items-center justify-center gap-2 text-indigo-600 font-bold text-sm hover:underline"
+                                    >
+                                        📥 Import từ Google Sheet
+                                    </button>
+                                ) : (
+                                    <div className="space-y-2">
                                         <input 
-                                            type="number" 
-                                            value={tempLimit} 
-                                            onChange={(e) => setTempLimit(e.target.value)}
-                                            className="w-20 px-2 py-1 border rounded"
+                                            type="text"
+                                            placeholder="Dán link Google Sheet vào đây..."
+                                            value={importUrl}
+                                            onChange={(e) => setImportUrl(e.target.value)}
+                                            className="w-full px-3 py-2 text-xs border rounded"
                                         />
-                                        <button onClick={handleSaveLimit} className="text-green-600 font-bold text-sm">Lưu</button>
-                                     </>
-                                 ) : (
-                                     <button onClick={() => setIsEditingLimit(true)} className="text-indigo-600 font-bold hover:underline">
-                                         {stats.today.limit} thẻ / ngày ✏️
-                                     </button>
-                                 )}
-                             </div>
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={handleImportSheet}
+                                                disabled={importStatus === 'loading'}
+                                                className="px-3 py-1 bg-indigo-600 text-white text-xs rounded font-bold hover:bg-indigo-700 disabled:opacity-50"
+                                            >
+                                                {importStatus === 'loading' ? 'Đang tải...' : 'Import'}
+                                            </button>
+                                            <button onClick={() => setShowImport(false)} className="text-xs text-slate-500">Hủy</button>
+                                        </div>
+                                        {importMsg && (
+                                            <div className={`text-xs p-2 rounded ${importStatus === 'error' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                                                {importMsg}
+                                            </div>
+                                        )}
+                                        <p className="text-[10px] text-slate-400">
+                                            Lưu ý: Sheet phải có cột "Từ", "Nghĩa của từ". File phải được chia sẻ "Bất kỳ ai có đường liên kết".
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
                          </div>
 
                      </div>
