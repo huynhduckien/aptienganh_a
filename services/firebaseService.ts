@@ -3,7 +3,7 @@ import { Flashcard, StudentAccount, ReviewLog } from "../types";
 import { DictionaryResponse } from "./geminiService";
 
 // URL Firebase chính thức của bạn
-const FIREBASE_URL = "https://nail-schedule-60cfa-default-rtdb.firebaseio.com/";
+const FIREBASE_URL = "https://nail-schedule-test-default-rtdb.europe-west1.firebasedatabase.app/";
 
 let currentSyncKey: string | null = null;
 
