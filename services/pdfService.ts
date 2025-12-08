@@ -1,4 +1,6 @@
 
+import { structurePaperWithAI } from './geminiService';
+
 export const extractTextFromPdf = async (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -26,9 +28,6 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
         // Apply cleaning
         let cleanedText = cleanIrrelevantContent(fullText);
         
-        // NEW: Aggressive Section Slicing (Keep only Intro -> Conclusion)
-        cleanedText = keepOnlyMainSections(cleanedText);
-
         resolve(cleanedText);
       } catch (error) {
         reject(error);
@@ -40,39 +39,6 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
   });
 };
 
-// NEW: Aggressive Slicer to cut off Title/Abstract/Authors
-const keepOnlyMainSections = (text: string): string => {
-    // 1. Identify start of Introduction
-    // Matches: "1. Introduction", "I. INTRODUCTION", "Introduction" (case insensitive) at start of line
-    const introRegex = /(?:^|\n)\s*(?:1\.?|I\.?)?\s*(?:INTRODUCTION|Introduction)\b/g;
-    let match = introRegex.exec(text);
-    
-    // If we find "Introduction", discard everything before it (Title, Abstract, Authors)
-    let startIndex = 0;
-    if (match) {
-        startIndex = match.index;
-    }
-
-    // 2. Identify start of References (to cut off the end)
-    const refRegex = /(?:^|\n)\s*(?:REFERENCES|Bibliography|Literature Cited)\b/i;
-    let endMatch = text.match(refRegex);
-    let endIndex = text.length;
-    if (endMatch && endMatch.index) {
-        endIndex = endMatch.index;
-    }
-
-    // Slice the text
-    let coreContent = text.substring(startIndex, endIndex);
-
-    // Safety check: If slicing removed too much (e.g. false positive), revert to full cleaned text
-    // Assuming a paper body should be at least 20% of the text or 1000 chars
-    if (coreContent.length < 500) {
-        return text.substring(0, endIndex); // Just cut references
-    }
-
-    return coreContent;
-};
-
 // Cleaner for metadata, headers, footers, and noise
 const cleanIrrelevantContent = (text: string): string => {
   let lines = text.split('\n');
@@ -80,10 +46,26 @@ const cleanIrrelevantContent = (text: string): string => {
 
   // 1. LINE-BASED FILTERING (Aggressive)
   const garbageLinePatterns = [
+      // Common Journal Noise (User Examples)
+      /^Full\s+length\s+article/i,
+      /^A\s*R\s*T\s*I\s*C\s*L\s*E\s*I\s*N\s*F\s*O/i, // Spaced out headers (A R T I C L E...)
+      /^A\s*B\s*S\s*T\s*R\s*A\s*C\s*T/i,
+      /.*(?:\(20\d{2}\)).*\d+/, // Matches "(2025) 111636" or similar page numbering
+      /Optics\s+(?:and|&)\s+Laser\s+Technology/i, // Specific example provided
+      /Available\s+online/i,
+      /Rights\s+reserved/i,
+      
+      // NEW: Specific Noise Patterns from User Feedback
+      /mining,\s*training/i, // "including those mining, training, similar technologies"
+      /similar\s+technologies/i,
+      /text\s+and\s+data\s+mining/i, 
+      /\d{4}-\d{3}[\dX]\/©/i, // ISSN copyright pattern like "0030-3992/©"
+      /^These\s+E-?mail\s+address/i, // "These E-mail address:"
+      /111636/i, // Specific ID provided by user
+      
       // Dates & Submission Info
       /Received\s+\d+/i,
       /Accepted\s+\d+/i,
-      /Available\s+online/i,
       /Revised\s+form/i,
       /Published\s+online/i,
       /Article\s+history/i,
@@ -117,21 +99,6 @@ const cleanIrrelevantContent = (text: string): string => {
       /School\s+of/i,
       /Tel\.:/i,
       /Fax:/i,
-      /Ph\.\s?D\./i,
-      /M\.\s?Sc\./i,
-      
-      // CRediT Authorship & Declarations
-      /Writing\s?[–-]\s?review/i,
-      /Conceptualization/i,
-      /Formal\s+analysis/i,
-      /Funding\s+acquisition/i,
-      /Declaration\s+of\s+competing\s+interest/i,
-      /conflict\s+of\s+interest/i,
-      /Data\s+availability/i,
-      /Acknowledgements/i,
-      /APPENDIX/i,
-      /Author\s+contributions/i,
-      /Credit\s+authorship/i,
       
       // Misc Noise
       /^Table\s+\d+/i, // Start of table
@@ -140,15 +107,28 @@ const cleanIrrelevantContent = (text: string): string => {
       /Contents\s+lists\s+available/i,
       /Journal\s+homepage/i,
       /Page\s+\d+\s+of\s+\d+/i, // Page numbers
-      /ABSTRACT/i, // We want to remove Abstract based on user request
-      /Key\s?words/i
+      /Key\s?words/i,
+      
+      // Specific Author Formats like "D.-P. Pham and H.-C. Tran"
+      /^[A-Z]\.-[A-Z]\.\s+[A-Z][a-z]+/
   ];
+
+  // Regex to PROTECT headers (Intro, Methods, Results, Discussion, Appendix, Glossary)
+  // Supports: "1. Introduction", "I. Introduction", "1.0 Introduction", "Introduction", "APPENDIX A"
+  const protectedHeaderPattern = /^(?:(?:\d+(?:\.\d*)?|[IVX]+)\.?\s*)?(?:ABSTRACT|INTRODUCTION|BACKGROUND|METHODS|MATERIALS|EXPERIMENTAL|RESULTS|DISCUSSION|CONCLUSIONS?|SUMMARY|REFERENCES|BIBLIOGRAPHY|APPENDIX|SUPPLEMENTARY|GLOSSARY|NOMENCLATURE|ACKNOWLEDGEMENTS?)\b/i;
 
   for (let line of lines) {
       line = line.trim();
       
-      // Skip empty or very short lines (often page numbers or artifacts)
-      if (line.length < 4) continue;
+      // Skip empty
+      if (line.length === 0) continue;
+
+      // Skip very short lines ONLY IF they are not section headers
+      if (line.length < 5 && !protectedHeaderPattern.test(line)) continue;
+      
+      // Filter standalone names/dates often found in headers
+      // Example: "D.-P. Pham and H.-C. Tran"
+      if (line.length < 50 && /^[A-Z]\.-[A-Z]\./.test(line) && !line.endsWith('.')) continue;
 
       // Check against garbage patterns
       let isGarbage = false;
@@ -159,12 +139,20 @@ const cleanIrrelevantContent = (text: string): string => {
           }
       }
 
-      // Check for author lists (usually list of names with superscripts like 'a, b' or just names)
+      // Check for author lists (heuristic)
       if (!isGarbage && line.length < 200 && line.includes(',')) {
           const authorListScore = (line.match(/[A-Z][a-z]+/g) || []).length; 
           const totalWords = line.split(/\s+/).length;
-          // If > 70% of words are capitalized and it doesn't end in '.', likely author list
           if (authorListScore / totalWords > 0.7 && !line.endsWith('.')) {
+              isGarbage = true;
+          }
+      }
+      
+      // Check for raw data rows (mostly numbers)
+      if (!isGarbage && line.length < 100) {
+          const digits = (line.match(/\d/g) || []).length;
+          const chars = line.length;
+          if (digits / chars > 0.5) { // If > 50% is numbers, likely a table row
               isGarbage = true;
           }
       }
@@ -178,19 +166,19 @@ const cleanIrrelevantContent = (text: string): string => {
   // Join back
   let cleaned = cleanedLines.join('\n');
 
-  // 2. INLINE CLEANING (Remove noise INSIDE sentences)
+  // 2. INLINE CLEANING (Refined)
   
-  // Remove Citations: [1], [1, 2], [1-3]
+  // Remove Citations: [1], [1, 2], [1-5], [1, 3-5]
   cleaned = cleaned.replace(/\[\s*\d+(?:\s*[,–-]\s*\d+)*\s*\]/g, '');
   
-  // Remove Citations: (Smith, 2020) or (Smith et al., 2020)
-  cleaned = cleaned.replace(/\([A-Za-z\s\.,&]+,\s*\d{4}[a-z]?\)/g, '');
-
-  // Remove URLs and Emails within text
-  cleaned = cleaned.replace(/(?:https?|ftp):\/\/[\n\S]+/g, '');
+  // Remove Citations: (Smith, 2020) or (Smith et al., 2020) or (Smith and Jones, 2020)
+  cleaned = cleaned.replace(/\([A-Z][a-z]+(?: et al\.| and [A-Z][a-z]+)?,?\s*\d{4}[a-z]?\)/g, '');
+  
+  // Remove URLs & Emails explicitly
+  cleaned = cleaned.replace(/(?:https?|ftp|doi):\/\/[\n\S]+/g, '');
   cleaned = cleaned.replace(/\b[\w\.-]+@[\w\.-]+\.\w{2,4}\b/g, '');
-
-  // Normalize multiple newlines
+  
+  // Normalize newlines
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
 
   return cleaned;
@@ -198,45 +186,273 @@ const cleanIrrelevantContent = (text: string): string => {
 
 export type DifficultyLevel = 'medium' | 'hard';
 
-export const chunkTextByLevel = (text: string, level: DifficultyLevel, language: 'en' | 'zh'): string[] => {
-  
-  // 1. ENGLISH LOGIC (Sentence based)
-  if (language === 'en') {
-      let minSentences = 2;
-      let maxSentences = 3; 
+// --- HELPER: SMART LOCAL MERGE (Fallback logic) ---
+// Merges short chunks (orphaned headers) into the next chunk
+const smartMergeChunks = (chunks: string[]): string[] => {
+    const merged: string[] = [];
+    let buffer = "";
 
-      if (level === 'hard') {
-        minSentences = 4;
-        maxSentences = 6;
-      }
+    for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i].trim();
+        if (!chunk) continue;
 
-      // Remove extra newlines for chunking
-      const cleanText = text.replace(/\r\n/g, ' ').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-      
-      // Robust sentence splitting
-      const sentenceRegex = /[^.!?]+[.!?]+(\s|$)/g;
-      const rawSentences = cleanText.match(sentenceRegex) || [cleanText];
-
-      const chunks: string[] = [];
-      let currentChunk: string[] = [];
-      
-      for (const sentence of rawSentences) {
-        // Filter out garbage sentences that might have survived
-        if (sentence.length < 15 || /^\d+$/.test(sentence.trim()) || /Page\s+\d+/i.test(sentence)) continue;
-
-        currentChunk.push(sentence.trim());
-
-        if (currentChunk.length >= maxSentences) {
-          chunks.push(currentChunk.join(' '));
-          currentChunk = [];
+        // If buffer has content, append this chunk to it
+        if (buffer) {
+            buffer += "\n\n" + chunk;
+            // If the combined result is long enough, push it
+            if (buffer.length > 500) {
+                merged.push(buffer);
+                buffer = "";
+            }
+            continue;
         }
-      }
-      if (currentChunk.length > 0) chunks.push(currentChunk.join(' '));
+
+        // If current chunk is too short (likely a header or orphaned paragraph)
+        // AND there is a next chunk, keep it in buffer
+        if (chunk.length < 300 && i < chunks.length - 1) {
+            buffer = chunk;
+        } else {
+            merged.push(chunk);
+        }
+    }
+    
+    // Push remaining buffer
+    if (buffer) {
+        if (merged.length > 0) {
+            // If buffer is small leftover, append to last valid chunk
+            merged[merged.length - 1] += "\n\n" + buffer;
+        } else {
+            merged.push(buffer);
+        }
+    }
+
+    return merged;
+};
+
+// --- ENGLISH LOGIC (IMRaD Section based) ---
+
+interface SectionIndices {
+    Introduction: number;
+    Methods: number;
+    Results: number;
+    Conclusion: number;
+    References: number;
+}
+
+const findBestMatchIndex = (text: string, regex: RegExp): number => {
+    const match = regex.exec(text);
+    return match ? match.index : -1;
+};
+
+const extractSections = (text: string): Record<string, string> => {
+    // 1. Identify "End of Paper" markers (References, etc.)
+    const endSectionRegex = /(?:^|\n)\s*(?:\d+\.?|\[\d+\])?\s*(?:REFERENCES|BIBLIOGRAPHY|LITERATURE\s+CITED|ACKNOWLEDGEMENTS?|FUNDING|DATA\s+AVAILABILITY|DECLARATION\s+OF|AUTHOR\s+CONTRIBUTIONS?|CREDIT\s+AUTHORSHIP)\b/i;
+    let endIndex = findBestMatchIndex(text, endSectionRegex);
+    
+    // 2. Define Regex for IMRaD + Appendix Sections
+    // IMPROVED: Added stronger detection for Appendices and Glossaries
+    const patterns = {
+        Introduction: /(?:^|\n)\s*(?:1\.?|I\.?|1\.0)?\s*(?:INTRODUCTION|BACKGROUND|OBJECTIVES)\b/i,
+        Methods: /(?:^|\n)\s*(?:2\.?|II\.?|2\.0)?\s*(?:METHODS|MATERIALS\s+(?:AND|&)\s+METHODS|METHODOLOGY|EXPERIMENTAL|MODEL)\b/i,
+        Results: /(?:^|\n)\s*(?:3\.?|III\.?|3\.0)?\s*(?:RESULTS|FINDINGS|DATA\s+ANALYSIS)\b/i,
+        Conclusion: /(?:^|\n)\s*(?:4\.?|5\.?|6\.?|IV\.?|V\.?|VI\.?)?\s*(?:DISCUSSION|CONCLUSIONS?|CONCLUDING|SUMMARY)\b/i,
+        Appendix: /(?:^|\n)\s*(?:APPENDIX\s*[A-Z]?|SUPPLEMENTARY\s+(?:MATERIAL|DATA|INFO)|GLOSSARY|NOMENCLATURE)\b/i
+    };
+
+    // 3. Find Indices
+    const indices: { name: string, index: number }[] = [];
+    
+    Object.entries(patterns).forEach(([name, regex]) => {
+        const index = findBestMatchIndex(text, regex);
+        if (index !== -1) {
+            indices.push({ name, index });
+        }
+    });
+
+    indices.sort((a, b) => a.index - b.index);
+
+    // 4. Extract Content
+    const sections: Record<string, string> = {
+        'Introduction': '',
+        'Methods': '',
+        'Results': '',
+        'Conclusion': '',
+        'Appendix': ''
+    };
+
+    // If no sections found, return entire text as Intro (fallback)
+    if (indices.length === 0) {
+        sections['Introduction'] = endIndex !== -1 ? text.substring(0, endIndex) : text;
+        return sections;
+    }
+
+    for (let i = 0; i < indices.length; i++) {
+        const current = indices[i];
+        const next = indices[i + 1];
+        
+        const start = current.index;
+        
+        // If there is a next section, end at its start.
+        // If not, end at 'endIndex' (Refs) OR end of text if endIndex is invalid/before start.
+        let end = next ? next.index : text.length;
+        
+        if (!next && endIndex !== -1 && endIndex > start) {
+            // Only use endIndex (Refs) if it appears AFTER the current section start
+            // AND if the current section is NOT Appendix (Appendix usually comes after refs)
+            if (current.name !== 'Appendix') {
+                end = endIndex;
+            }
+        }
+
+        // Specifically for Appendix: It often comes AFTER references. 
+        // If this is Appendix, allow reading until the end of file.
+        if (current.name === 'Appendix') {
+            end = text.length;
+        }
+        
+        let content = text.substring(start, end);
+        // Remove the exact header line to avoid duplicate "1. Introduction" if AI regenerates it
+        content = content.replace(/^.+$/m, '').trim(); 
+        
+        if (sections[current.name] !== undefined) {
+             sections[current.name] += (sections[current.name] ? '\n\n' : '') + content;
+        }
+    }
+
+    return sections;
+};
+
+// IMPROVED: Helper to split huge text into sentences without breaking abbreviations
+// Looks for [.!?] followed by a space and a capital letter.
+const splitBySentences = (text: string): string[] => {
+    // Insert a unique delimiter at likely sentence boundaries
+    // "Fig. 1" -> No split
+    // "End. Start" -> Split
+    return text.replace(/([.!?])\s+(?=[A-Z])/g, "$1|").split("|");
+};
+
+// IMPROVED: Smart Semantic Splitter
+// Prioritizes paragraphs, handles huge blocks, and prevents orphan tails.
+const smartSplitContent = (content: string, targetLength: number = 1800): string[] => {
+    const paragraphs = content.split(/\n\s*\n/);
+    const chunks: string[] = [];
+    let buffer = "";
+
+    for (let p of paragraphs) {
+        p = p.trim();
+        if (!p) continue;
+
+        // CASE 1: Paragraph is MASSIVE (e.g. > 1.5x target)
+        // Must split internally by sentences
+        if (p.length > targetLength * 1.5) {
+            // First, flush whatever is in the buffer to a chunk
+            if (buffer) { chunks.push(buffer); buffer = ""; }
+
+            const sentences = splitBySentences(p);
+            let sentBuffer = "";
+            
+            for (const s of sentences) {
+                if (sentBuffer.length + s.length > targetLength) {
+                    chunks.push(sentBuffer);
+                    sentBuffer = s;
+                } else {
+                    sentBuffer += (sentBuffer ? " " : "") + s;
+                }
+            }
+            // Keep the remainder of this huge paragraph in the main buffer
+            if (sentBuffer) buffer = sentBuffer; 
+            continue;
+        }
+
+        // CASE 2: Adding this paragraph exceeds target length
+        if (buffer.length + p.length > targetLength) {
+            // SOFT LIMIT CHECK: 
+            // If overflowing by just a little (e.g., < 20%), let it slide to keep paragraph intact.
+            if (buffer.length + p.length < targetLength * 1.2) {
+                buffer += "\n\n" + p;
+                chunks.push(buffer);
+                buffer = "";
+            } else {
+                // Otherwise, push current buffer and start new with this paragraph
+                chunks.push(buffer);
+                buffer = p;
+            }
+        } else {
+            // CASE 3: Fits comfortably
+            buffer += (buffer ? "\n\n" : "") + p;
+        }
+    }
+
+    // HANDLE TAIL (The final buffer)
+    if (buffer) {
+        // Orphan Prevention:
+        // If the last chunk is very small (< 400 chars) and we have previous chunks,
+        // merge it backwards to the previous chunk, unless that makes the previous chunk absurdly large.
+        if (buffer.length < 500 && chunks.length > 0) {
+            const lastChunk = chunks[chunks.length - 1];
+            // Safety limit: Don't merge if it makes the chunk > 2.5x target
+            if (lastChunk.length + buffer.length < targetLength * 2.5) {
+                chunks[chunks.length - 1] += "\n\n" + buffer;
+            } else {
+                chunks.push(buffer);
+            }
+        } else {
+            chunks.push(buffer);
+        }
+    }
+
+    return chunks;
+};
+
+// NOW ASYNC TO SUPPORT AI STRUCTURING
+export const chunkTextByLevel = async (text: string, level: DifficultyLevel, language: 'en' | 'zh'): Promise<string[]> => {
+  
+  // 1. ENGLISH LOGIC (AI Structure + IMRaD Fallback)
+  if (language === 'en') {
       
-      return chunks;
+      // OPTION A: AI Structuring (Primary)
+      try {
+          console.log("Attempting AI Structure analysis...");
+          const aiStructuredChunks = await structurePaperWithAI(text);
+          if (aiStructuredChunks && aiStructuredChunks.length > 0) {
+              return aiStructuredChunks;
+          }
+      } catch (e) {
+          console.warn("AI Structure failed or text too long, falling back to local regex split.", e);
+      }
+
+      // OPTION B: Regex Local Split (Fallback)
+      const sections = extractSections(text);
+      let allChunks: string[] = [];
+      const sectionKeys = ['Introduction', 'Methods', 'Results', 'Conclusion', 'Appendix']; 
+
+      for (const sectionName of sectionKeys) {
+          const content = sections[sectionName];
+          if (!content || content.length < 100) continue;
+
+          // Split logic using NEW Smart Splitter
+          // Target ~1800 chars per chunk for meaningful length
+          const parts = smartSplitContent(content, 1800);
+          
+          // Label logic
+          const labeledParts = parts.map((p, idx) => {
+              // Only add label if it's the very first part of a section
+              const label = idx === 0 ? `## ${sectionName.toUpperCase()}\n\n` : "";
+              return `${label}${p}`;
+          });
+
+          allChunks.push(...labeledParts);
+      }
+
+      // If extraction failed completely (no IMRaD headers found)
+      if (allChunks.length === 0) {
+           allChunks = smartSplitContent(text, 2000);
+      }
+      
+      return allChunks;
   } 
   
-  // 2. CHINESE LOGIC (Part based)
+  // 2. CHINESE LOGIC
   else {
       const cleanText = text.replace(/\r\n/g, '\n').replace(/\n{2,}/g, '\n').trim();
       
@@ -258,6 +474,7 @@ export const chunkTextByLevel = (text: string, level: DifficultyLevel, language:
 
           let endIndex = startIndex + targetChunkSize;
           
+          // Fix for Last Chunk in Chinese Logic
           if (i === partsCount - 1) {
               endIndex = cleanText.length;
           } else {
@@ -282,6 +499,12 @@ export const chunkTextByLevel = (text: string, level: DifficultyLevel, language:
               chunks.push(chunk);
           }
           startIndex = endIndex;
+      }
+      
+      // Chinese Tail Merge Check
+      if (chunks.length > 1 && chunks[chunks.length - 1].length < 100) {
+          const last = chunks.pop()!;
+          chunks[chunks.length - 1] += "\n\n" + last;
       }
 
       return chunks;

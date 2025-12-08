@@ -5,6 +5,13 @@ export interface KeyTerm {
   meaning: string;
 }
 
+export interface DictionaryResponse {
+  shortMeaning: string;
+  phonetic: string;
+  detailedExplanation: string;
+  originalTerm?: string;
+}
+
 export interface QuizQuestion {
   question: string;
   options: string[]; // [A, B, C]

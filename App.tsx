@@ -1,12 +1,11 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { LessonView } from './components/LessonView';
 import { Dashboard } from './components/Dashboard';
 import { AdminPanel } from './components/AdminPanel'; 
 import { chunkTextByLevel, DifficultyLevel } from './services/pdfService';
-import { ProcessedChunk, SavedPaper, Flashcard } from './types';
+import { ProcessedChunk, SavedPaper, Flashcard, LessonContent } from './types';
 import { saveFlashcard, getDueFlashcards, getFlashcards, setSyncKeyAndSync } from './services/flashcardService';
 import { FlashcardReview } from './components/FlashcardReview';
 import { savePaperToDB, getAllPapersFromDB, updatePaperProgress, deletePaperFromDB, generateId, clearAllFlashcardsFromDB } from './services/db';
@@ -35,6 +34,9 @@ const App: React.FC = () => {
   const [showAdmin, setShowAdmin] = useState(false); 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'exists'>('idle');
   const [syncKey, setSyncKey] = useState<string | null>(null);
+  
+  // NEW: Processing State for AI Structure
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     const storedKey = localStorage.getItem('paperlingo_sync_key');
@@ -44,8 +46,7 @@ const App: React.FC = () => {
     }
     loadPapers();
     if (!storedKey) getFlashcards().then(() => updateDueCount());
-    const interval = setInterval(updateDueCount, 60000);
-    return () => clearInterval(interval);
+    // FIX: Removed setInterval that was causing flashcard reset
   }, []);
 
   const handleSetSyncKey = async (key: string) => {
@@ -73,38 +74,64 @@ const App: React.FC = () => {
 
   const updateDueCount = async () => { setDueCards(await getDueFlashcards()); };
 
-  // UPDATED: Receive Language from FileUpload
-  const handleTextExtracted = (text: string, name: string, lang: 'en' | 'zh') => {
-    setRawText(text);
-    setFileName(name);
-    setPaperLanguage(lang);
-    setAppState('level_select');
+  // Helper to init paper (used for both immediate EN start and delayed ZH start)
+  const initializePaper = async (text: string, name: string, lang: 'en' | 'zh', level: DifficultyLevel) => {
+      setIsProcessing(true); // START LOADING
+      try {
+          // 1. Chunk Text (Now Async)
+          const textChunks = await chunkTextByLevel(text, level, lang);
+          const initialChunks: ProcessedChunk[] = textChunks.map((t, idx) => ({ id: idx, text: t, isCompleted: false }));
+
+          // 2. Create Paper Object
+          const newPaper: SavedPaper = {
+              id: generateId(),
+              fileName: name,
+              originalText: text,
+              language: lang,
+              processedChunks: initialChunks,
+              currentChunkIndex: 0,
+              createdAt: Date.now(),
+              lastOpened: Date.now()
+          };
+
+          // 3. Save & Set State
+          await savePaperToDB(newPaper);
+          setPapers(prev => [newPaper, ...prev]);
+          
+          setRawText(text);
+          setFileName(name);
+          setPaperLanguage(lang);
+          
+          setCurrentPaperId(newPaper.id);
+          setChunks(initialChunks);
+          setCurrentChunkIndex(0);
+          setAppState('study');
+          setDictionary(null);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (e) {
+          console.error(e);
+          alert("Có lỗi khi xử lý bài báo. Vui lòng thử lại.");
+      } finally {
+          setIsProcessing(false); // STOP LOADING
+      }
   };
 
-  const startLearning = async (level: DifficultyLevel) => {
-    // Pass language to chunker
-    const textChunks = chunkTextByLevel(rawText, level, paperLanguage);
-    const initialChunks: ProcessedChunk[] = textChunks.map((t, idx) => ({ id: idx, text: t, isCompleted: false }));
+  // UPDATED: Receive Language from FileUpload
+  const handleTextExtracted = (text: string, name: string, lang: 'en' | 'zh') => {
+    if (lang === 'en') {
+        // English: Skip level selection, default to 'medium'
+        initializePaper(text, name, lang, 'medium');
+    } else {
+        // Chinese: Go to level selection
+        setRawText(text);
+        setFileName(name);
+        setPaperLanguage(lang);
+        setAppState('level_select');
+    }
+  };
 
-    const newPaper: SavedPaper = {
-        id: generateId(),
-        fileName: fileName,
-        originalText: rawText,
-        language: paperLanguage, // Save language
-        processedChunks: initialChunks,
-        currentChunkIndex: 0,
-        createdAt: Date.now(),
-        lastOpened: Date.now()
-    };
-
-    await savePaperToDB(newPaper);
-    setPapers(prev => [newPaper, ...prev]);
-    setCurrentPaperId(newPaper.id);
-    setChunks(initialChunks);
-    setCurrentChunkIndex(0);
-    setAppState('study');
-    setDictionary(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const startLearningChinese = async (level: DifficultyLevel) => {
+      await initializePaper(rawText, fileName, paperLanguage, level);
   };
 
   const openSavedPaper = async (paper: SavedPaper) => {
@@ -131,6 +158,15 @@ const App: React.FC = () => {
     const newChunks = chunks.map(c => c.id === chunkId ? { ...c, isCompleted: true } : c);
     setChunks(newChunks);
     if (currentPaperId) updatePaperProgress(currentPaperId, newChunks, currentChunkIndex);
+  };
+
+  // NEW: Save AI Content immediately after loading
+  const handleChunkContentUpdate = async (chunkId: number, content: LessonContent) => {
+      const newChunks = chunks.map(c => c.id === chunkId ? { ...c, content } : c);
+      setChunks(newChunks);
+      if (currentPaperId) {
+          await updatePaperProgress(currentPaperId, newChunks, currentChunkIndex);
+      }
   };
 
   const handleNext = () => {
@@ -221,7 +257,6 @@ const App: React.FC = () => {
                 papers={papers}
                 onOpenPaper={openSavedPaper}
                 onDeletePaper={handleDeletePaper}
-                onNewPaper={() => setAppState('upload')}
                 onOpenFlashcards={() => setShowFlashcards(true)}
                 syncKey={syncKey}
                 onSetSyncKey={handleSetSyncKey}
@@ -232,43 +267,52 @@ const App: React.FC = () => {
         {appState === 'upload' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
             <button onClick={() => setAppState('dashboard')} className="absolute top-0 left-4 text-slate-400 hover:text-slate-600 font-bold z-10">← Quay lại Dashboard</button>
-            {/* UPDATED: Pass language handling */}
-            <FileUpload onTextExtracted={handleTextExtracted} />
+            {/* UPDATED: Pass language handling and processing state */}
+            <FileUpload 
+                onTextExtracted={handleTextExtracted} 
+                isProcessing={isProcessing}
+            />
           </div>
         )}
 
         {appState === 'level_select' && (
            <div className="max-w-3xl mx-auto text-center py-12 animate-in fade-in zoom-in duration-300">
-              <h2 className="text-3xl font-bold text-slate-900 mb-3">Chọn cấp độ phù hợp</h2>
-              <div className="inline-block px-3 py-1 bg-slate-100 rounded-full text-xs font-bold text-slate-500 mb-8">
-                  Ngôn ngữ đang xử lý: {paperLanguage === 'zh' ? 'Tiếng Trung (Phồn thể)' : 'Tiếng Anh'}
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <button onClick={() => startLearning('medium')} className="group bg-white p-8 rounded-2xl border border-gray-200 hover:border-sky-500 hover:shadow-lg transition-all text-left">
-                      <div className="w-12 h-12 bg-sky-50 text-sky-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12h10"/><path d="M9 4v16"/><path d="m3 9 3 3-3 3"/></svg>
+               {isProcessing ? (
+                   <div className="flex flex-col items-center justify-center p-12 bg-white rounded-3xl shadow-sm border border-slate-100">
+                       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
+                       <h2 className="text-xl font-bold text-slate-800">Đang chuẩn bị bài học...</h2>
+                       <p className="text-slate-500">Vui lòng đợi trong giây lát.</p>
+                   </div>
+               ) : (
+                   <>
+                      <h2 className="text-3xl font-bold text-slate-900 mb-3">Chọn cấp độ phù hợp</h2>
+                      <div className="inline-block px-3 py-1 bg-slate-100 rounded-full text-xs font-bold text-slate-500 mb-8">
+                          Ngôn ngữ đang xử lý: Tiếng Trung (Phồn thể)
                       </div>
-                      <h3 className="text-lg font-bold text-slate-900 mb-1">Cơ bản (Vừa phải)</h3>
-                      <p className="text-sm text-slate-500">
-                          {paperLanguage === 'zh' 
-                            ? 'Chia bài văn thành 5-8 phần nhỏ. Dễ đọc.'
-                            : '2-3 câu mỗi đoạn. Phù hợp để nắm bắt ý chính.'}
-                      </p>
-                  </button>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                          <button onClick={() => startLearningChinese('medium')} className="group bg-white p-8 rounded-2xl border border-gray-200 hover:border-sky-500 hover:shadow-lg transition-all text-left">
+                              <div className="w-12 h-12 bg-sky-50 text-sky-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12h10"/><path d="M9 4v16"/><path d="m3 9 3 3-3 3"/></svg>
+                              </div>
+                              <h3 className="text-lg font-bold text-slate-900 mb-1">Cơ bản (Vừa phải)</h3>
+                              <p className="text-sm text-slate-500">
+                                  Chia bài văn thành 5-8 phần nhỏ. Dễ đọc.
+                              </p>
+                          </button>
 
-                  <button onClick={() => startLearning('hard')} className="group bg-white p-8 rounded-2xl border border-gray-200 hover:border-violet-500 hover:shadow-lg transition-all text-left">
-                       <div className="w-12 h-12 bg-violet-50 text-violet-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+                          <button onClick={() => startLearningChinese('hard')} className="group bg-white p-8 rounded-2xl border border-gray-200 hover:border-violet-500 hover:shadow-lg transition-all text-left">
+                              <div className="w-12 h-12 bg-violet-50 text-violet-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+                              </div>
+                              <h3 className="text-lg font-bold text-slate-900 mb-1">Nâng cao</h3>
+                              <p className="text-sm text-slate-500">
+                                  Chia bài văn thành 2-4 phần lớn. Thử thách.
+                              </p>
+                          </button>
                       </div>
-                      <h3 className="text-lg font-bold text-slate-900 mb-1">Nâng cao</h3>
-                      <p className="text-sm text-slate-500">
-                          {paperLanguage === 'zh' 
-                            ? 'Chia bài văn thành 2-4 phần lớn. Thử thách.'
-                            : '4-6 câu mỗi đoạn. Thử thách đọc hiểu sâu.'}
-                      </p>
-                  </button>
-              </div>
+                   </>
+               )}
            </div>
         )}
 
@@ -287,6 +331,7 @@ const App: React.FC = () => {
                 onComplete={handleChunkComplete}
                 onNext={handleNext}
                 onLookup={(term, meaning, explanation, phonetic) => { setDictionary({term, meaning, explanation, phonetic}); setSaveStatus('idle'); }}
+                onContentUpdate={handleChunkContentUpdate} // NEW PROP
                 isLast={currentChunkIndex === chunks.length - 1}
               />
             </div>
@@ -339,7 +384,7 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {showFlashcards && <FlashcardReview cards={dueCards} onClose={() => setShowFlashcards(false)} onUpdate={updateDueCount} />}
+      {showFlashcards && <FlashcardReview cards={dueCards} onClose={() => { setShowFlashcards(false); updateDueCount(); }} onUpdate={updateDueCount} />}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
     </div>
   );

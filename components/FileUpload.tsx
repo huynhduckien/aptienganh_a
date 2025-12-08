@@ -1,11 +1,13 @@
+
 import React, { useState } from 'react';
 import { extractTextFromPdf } from '../services/pdfService';
 
 interface FileUploadProps {
   onTextExtracted: (text: string, filename: string, language: 'en' | 'zh') => void;
+  isProcessing?: boolean; // NEW PROP
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({ onTextExtracted }) => {
+export const FileUpload: React.FC<FileUploadProps> = ({ onTextExtracted, isProcessing = false }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +59,27 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onTextExtracted }) => {
       processFile(e.target.files[0]);
     }
   };
+
+  // NEW: Processing Overlay
+  if (isProcessing) {
+      return (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] p-4">
+              <div className="bg-white p-8 rounded-3xl shadow-xl border border-indigo-100 flex flex-col items-center max-w-md w-full animate-in zoom-in duration-300">
+                  <div className="relative mb-6">
+                      <div className="animate-spin rounded-full h-16 w-16 border-4 border-indigo-100 border-t-indigo-600"></div>
+                      <div className="absolute inset-0 flex items-center justify-center text-2xl">🤖</div>
+                  </div>
+                  <h2 className="text-xl font-bold text-slate-800 mb-2">AI đang cấu trúc bài báo...</h2>
+                  <p className="text-center text-slate-500 text-sm mb-4">
+                      Hệ thống đang loại bỏ rác, gộp tiêu đề và chia nhỏ nội dung cho dễ đọc. Quá trình này có thể mất 10-20 giây.
+                  </p>
+                  <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                      <div className="bg-indigo-500 h-full animate-[progress_2s_ease-in-out_infinite] w-1/3 rounded-full"></div>
+                  </div>
+              </div>
+          </div>
+      );
+  }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] p-4 animate-in fade-in zoom-in duration-500">

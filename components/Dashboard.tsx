@@ -6,7 +6,7 @@ interface DashboardProps {
   papers: SavedPaper[];
   onOpenPaper: (paper: SavedPaper) => void;
   onDeletePaper: (id: string) => void;
-  onNewPaper: () => void;
+  // REMOVED: onNewPaper prop
   onOpenFlashcards: () => void;
   // Sync props
   syncKey: string | null;
@@ -15,7 +15,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-    papers, onOpenPaper, onDeletePaper, onNewPaper, onOpenFlashcards,
+    papers, onOpenPaper, onDeletePaper, onOpenFlashcards,
     syncKey, onSetSyncKey, onOpenAdmin
 }) => {
   const [inputKey, setInputKey] = useState('');
@@ -160,12 +160,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             >
                 <span>📚</span> Flashcards
             </button>
-            <button 
-                onClick={onNewPaper}
-                className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
-            >
-                <span>+</span> Thêm bài mới
-            </button>
+            {/* REMOVED: "Thêm bài mới" Button */}
         </div>
       </div>
 
@@ -173,9 +168,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {papers.length === 0 ? (
         <div className="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
            <div className="text-6xl mb-4">📂</div>
-           <h3 className="text-xl font-bold text-slate-700 mb-2">Chưa có bài báo nào</h3>
-           <p className="text-slate-400 mb-6">Hãy tải lên file PDF đầu tiên để bắt đầu học.</p>
-           <button onClick={onNewPaper} className="text-indigo-600 font-bold hover:underline">Tải lên ngay</button>
+           <h3 className="text-xl font-bold text-slate-700 mb-2">Thư viện trống</h3>
+           <p className="text-slate-400 mb-6">Hiện chưa có bài báo nào được giao.</p>
+           {/* REMOVED: "Tải lên ngay" Button */}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
