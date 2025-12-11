@@ -1,4 +1,5 @@
 
+declare const pdfjsLib: any;
 import { structurePaperWithAI } from './geminiService';
 
 export const extractTextFromPdf = async (file: File): Promise<string> => {
