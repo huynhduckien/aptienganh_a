@@ -1,3 +1,4 @@
+
 export interface DictionaryResponse {
   shortMeaning: string;
   phonetic: string;
@@ -27,6 +28,7 @@ export interface Flashcard {
   level: number; // 0: New, 1: Learning, 2+: Review/Mastered
   nextReview: number; // Timestamp
   createdAt: number;
+  lastUpdated?: number; // NEW: Timestamp for sync resolution (Last Write Wins)
   
   // Advanced SRS
   easeFactor: number; // Default 2.5
@@ -35,6 +37,9 @@ export interface Flashcard {
   
   // NEW: Anki Learning Steps tracker
   step?: number; // 0 = 1st step (1m), 1 = 2nd step (10m), etc.
+
+  // FORGOTTEN STATE
+  isForgotten?: boolean; // True if user rated 'Again', cleared when 'Good'/'Easy'
 }
 
 export interface ReviewLog {
@@ -76,6 +81,8 @@ export interface AnkiStats {
         labels: string[];
         data: number[];
     };
+    due: number;
+    forgotten: number; // New stat
 }
 
 export interface ChartDataPoint {

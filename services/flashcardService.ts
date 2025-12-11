@@ -1,6 +1,6 @@
 import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint, AnkiStats, Deck } from "../types";
 import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB, saveDeckToDB, getDecksFromDB, deleteDeckFromDB, deleteFlashcardFromDB } from "./db";
-import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey, fetchCloudReviewLogs, saveCloudReviewLog, fetchCloudDecks, saveCloudDeck, deleteCloudDeck } from "./firebaseService";
+import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey, fetchCloudReviewLogs, saveCloudReviewLog, fetchCloudDecks, saveCloudDeck, deleteCloudDeck, deleteCloudFlashcard } from "./firebaseService";
 
 let hasSynced = false;
 
@@ -38,7 +38,7 @@ export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     
     hasSynced = false;
 
-    // 1. Tải Flashcards
+    // 1. Tải Flashcards và Đồng bộ thông minh (Last Write Wins)
     await getFlashcards(); 
 
     // 2. Tải Decks
@@ -49,11 +49,10 @@ export const setSyncKeyAndSync = async (key: string): Promise<void> => {
         }
     } catch(e) { console.warn("Sync Decks Error", e); }
 
-    // 3. Tải Review Logs (Lịch sử học) để vẽ biểu đồ
+    // 3. Tải Review Logs (Lịch sử học)
     try {
         const cloudLogs = await fetchCloudReviewLogs();
         if (cloudLogs && cloudLogs.length > 0) {
-            // Lưu logs vào DB local để các hàm thống kê hoạt động
             for (const log of cloudLogs) {
                 await saveReviewLogToDB(log);
             }
@@ -78,8 +77,6 @@ export const createDeck = async (name: string, description?: string): Promise<De
 };
 
 export const getDecks = async (): Promise<Deck[]> => {
-    // Sync logic handled in setSyncKeyAndSync mostly, but can add detailed sync here if needed
-    // For now, trust DB first
     return await getDecksFromDB();
 };
 
@@ -88,15 +85,13 @@ export const deleteDeck = async (deckId: string): Promise<void> => {
     await deleteDeckFromDB(deckId);
     deleteCloudDeck(deckId);
 
-    // 2. Delete All Cards in Deck
+    // 2. Delete All Cards in Deck (Local AND Cloud)
     const allCards = await getFlashcards();
     const cardsInDeck = allCards.filter(c => c.deckId === deckId);
     
     for (const card of cardsInDeck) {
-        // Technically we could soft delete or move to "Uncategorized"
-        // But strict deletion is safer for now
         await deleteFlashcardFromDB(card.id);
-        // We probably need a deleteCloudFlashcard method, but let's leave it for now (cards become orphaned in cloud)
+        deleteCloudFlashcard(card.id); // Ensure deletion from cloud
     }
 };
 
@@ -118,24 +113,30 @@ export const getFlashcards = async (): Promise<Flashcard[]> => {
        if (cloudCards.length > 0) {
            const mergedMap = new Map<string, Flashcard>();
            
+           // Load all local cards first
            localCards.forEach(c => mergedMap.set(c.id, c));
            
            for (const cloudCard of cloudCards) {
                const localCard = mergedMap.get(cloudCard.id);
                
                if (!localCard) {
+                   // Case 1: Exists on Cloud, not Local -> Save Local
                    mergedMap.set(cloudCard.id, cloudCard);
                    await saveFlashcardToDB(cloudCard);
                } else {
-                   const localProgress = (localCard.repetitions || 0) + (localCard.interval || 0);
-                   const cloudProgress = (cloudCard.repetitions || 0) + (cloudCard.interval || 0);
-                   
-                   if (cloudProgress > localProgress) {
+                   // Case 2: Exists on both -> Compare Timestamps (Last Write Wins)
+                   const localTime = localCard.lastUpdated || 0;
+                   const cloudTime = cloudCard.lastUpdated || 0;
+
+                   if (cloudTime > localTime) {
+                       // Cloud is newer
                        mergedMap.set(cloudCard.id, cloudCard);
                        await saveFlashcardToDB(cloudCard);
-                   } else if (localProgress > cloudProgress) {
+                   } else if (localTime > cloudTime) {
+                       // Local is newer (e.g. offline study)
                        saveCloudFlashcard(localCard);
                    }
+                   // If equal, do nothing
                }
            }
            
@@ -155,7 +156,7 @@ export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'next
   const cards = await getFlashcards();
   
   if (cards.some(c => c.term.toLowerCase() === card.term.toLowerCase() && c.deckId === card.deckId)) {
-    return false; // Prevent duplicates in SAME deck (or global if deck undefined)
+    return false; // Prevent duplicates in SAME deck
   }
 
   const newCard: Flashcard = {
@@ -164,10 +165,12 @@ export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'next
     level: 0, // 0 = New
     nextReview: Date.now(),
     createdAt: Date.now(),
+    lastUpdated: Date.now(), // SYNC TIMESTAMP
     easeFactor: STARTING_EASE,
     interval: 0,
     repetitions: 0,
-    step: 0
+    step: 0,
+    isForgotten: false
   };
 
   await saveFlashcardToDB(newCard);
@@ -345,20 +348,15 @@ export const getDueFlashcards = async (deckId?: string): Promise<Flashcard[]> =>
   return allDue.slice(0, remainingQuota);
 };
 
-export const getForgottenCardsToday = async (): Promise<Flashcard[]> => {
-    const logs = await getReviewLogsFromDB();
+// NEW: Get Persistent Forgotten Cards
+export const getForgottenFlashcards = async (deckId?: string): Promise<Flashcard[]> => {
     const cards = await getFlashcards();
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const todayTs = startOfDay.getTime();
+    let forgotten = cards.filter(c => c.isForgotten === true);
     
-    // Get IDs of cards marked 'again' today
-    const forgottenIds = new Set(
-        logs.filter(l => l.timestamp >= todayTs && l.rating === 'again')
-            .map(l => l.cardId)
-    );
-
-    return cards.filter(c => forgottenIds.has(c.id));
+    if (deckId) {
+        forgotten = forgotten.filter(c => c.deckId === deckId);
+    }
+    return forgotten;
 };
 
 // --- ANKI STATS GENERATOR (Supports Deck Filtering) ---
@@ -381,6 +379,12 @@ export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
     const todayTs = startOfDay.getTime();
     const todayLogs = logs.filter(l => l.timestamp >= todayTs);
     
+    // Calculate due count for display purposes in stats (without limit trimming)
+    const rawDueCount = cards.filter(c => c.interval < 10000 && c.nextReview <= now).length;
+    
+    // Calculate forgotten count
+    const forgottenCount = cards.filter(c => c.isForgotten === true).length;
+
     const todayStats = {
         studied: todayLogs.length,
         limit: getDailyLimit(),
@@ -472,8 +476,10 @@ export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
             labels: forecastLabels,
             maxTotal: maxForecast 
         },
-        intervals: { data: intervalBuckets, labels: intervalLabels }
-    };
+        intervals: { data: intervalBuckets, labels: intervalLabels },
+        due: rawDueCount,
+        forgotten: forgottenCount
+    } as any;
 };
 
 // --- PREVIEW HELPER ---
@@ -586,6 +592,14 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
   const card = cards[index];
   const { nextReview, interval, easeFactor, repetitions, step } = calculateNextReview(card, rating);
 
+  // UPDATE FORGOTTEN STATE
+  let isForgotten = card.isForgotten || false;
+  if (rating === 'again') {
+      isForgotten = true; // Mark as forgotten if user clicked Again
+  } else if (rating === 'good' || rating === 'easy') {
+      isForgotten = false; // Clear forgotten state if user knows it
+  }
+
   const updatedCard: Flashcard = { 
       ...card, 
       nextReview, 
@@ -593,7 +607,9 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
       easeFactor, 
       repetitions, 
       step,
-      level: interval >= 21 ? 2 : 1 
+      isForgotten,
+      level: interval >= 21 ? 2 : 1,
+      lastUpdated: Date.now() // SYNC TIMESTAMP
   };
   
   await saveFlashcardToDB(updatedCard);
