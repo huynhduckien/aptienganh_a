@@ -1,6 +1,6 @@
 import { Flashcard, StudentAccount, ReviewLog, DictionaryResponse, Deck } from "../types";
 
-// URL Firebase chính thức (Đã bỏ dấu / ở cuối để tránh lỗi double slash)
+// URL Firebase chính thức
 const FIREBASE_URL = "https://nail-schedule-test-default-rtdb.europe-west1.firebasedatabase.app";
 
 let currentSyncKey: string | null = null;
@@ -154,7 +154,6 @@ export const saveCloudDictionaryItem = async (term: string, data: DictionaryResp
 // --- ADMIN MANAGEMENT ---
 
 export const createStudentAccount = async (name: string): Promise<StudentAccount> => {
-    // Tạo key ngẫu nhiên dễ nhớ hơn UUID: tên-số (ví dụ: hieu-8392)
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const safeName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
     const key = `${safeName}-${randomSuffix}`;
@@ -189,51 +188,67 @@ export const getAllStudents = async (): Promise<StudentAccount[]> => {
 };
 
 // Kiểm tra xem key học viên nhập có tồn tại trong hệ thống không
-export const verifyStudentKey = async (key: string): Promise<StudentAccount | null> => {
+export const verifyStudentKey = async (inputKey: string): Promise<StudentAccount | null> => {
     try {
-        const trimmedKey = key.trim();
-        const url = `${FIREBASE_URL}/admin/students/${trimmedKey}.json`;
+        const trimmedInput = inputKey.trim();
+        const searchLower = trimmedInput.toLowerCase();
         
-        console.log("Verifying key at:", url); 
-        const response = await fetch(url);
-        
-        // 1. Kiểm tra lỗi quyền truy cập (Quan trọng)
+        console.log("Verifying key:", trimmedInput);
+
+        // BƯỚC 1: Lấy TOÀN BỘ danh sách học viên về để tìm kiếm thông minh
+        // (Cách này tránh lỗi case-sensitive của Firebase và cho phép tìm theo Tên)
+        const response = await fetch(`${FIREBASE_URL}/admin/students.json`);
+
         if (response.status === 401 || response.status === 403) {
             alert("LỖI QUYỀN TRUY CẬP: Bạn chưa mở khóa Database (Rules). Hãy vào Firebase Console -> Build -> Realtime Database -> Rules và đổi '.read': true, '.write': true");
             return null;
         }
-        
-        if (!response.ok) {
-            console.error("Firebase Error:", response.status, response.statusText);
-            return null;
-        }
-        
-        const data = await response.json();
-        
-        // 2. Nếu tìm thấy tài khoản -> Đăng nhập thành công
-        if (data) return data;
 
-        // 3. TỰ ĐỘNG TẠO TÀI KHOẢN NẾU CHƯA CÓ (Để fix lỗi "Mã không hợp lệ" khi database rỗng)
-        // Đây là tính năng tiện lợi cho môi trường Test
+        let foundAccount: StudentAccount | null = null;
+        const allStudentsData = await response.json();
+
+        if (allStudentsData) {
+            const students = Object.values(allStudentsData) as StudentAccount[];
+            
+            // Tìm kiếm ưu tiên: Khớp Key chính xác -> Khớp Key (không phân biệt hoa thường) -> Khớp Tên
+            foundAccount = students.find(s => s.key === trimmedInput) // Exact Key
+                        || students.find(s => s.key.toLowerCase() === searchLower) // Case-insensitive Key
+                        || students.find(s => s.name.toLowerCase() === searchLower) // Match Name
+                        || null;
+        }
+
+        // BƯỚC 2: Nếu tìm thấy -> Trả về tài khoản đó
+        if (foundAccount) {
+            console.log("Found account:", foundAccount);
+            return foundAccount;
+        }
+
+        // BƯỚC 3: Nếu không tìm thấy -> TỰ ĐỘNG TẠO TÀI KHOẢN MỚI
+        // Giúp bạn không bao giờ bị kẹt ở màn hình đăng nhập
+        console.log("Account not found, auto-creating...");
+        
+        // Sử dụng chính input của người dùng làm key (nếu nó hợp lệ) hoặc tạo key mới
+        const safeKey = trimmedInput.replace(/[^a-zA-Z0-9-_]/g, '');
+        const finalKey = safeKey || `user-${Date.now()}`;
+        
         const autoAccount: StudentAccount = {
-            key: trimmedKey,
-            name: `Học viên ${trimmedKey}`,
+            key: finalKey,
+            name: `Học viên ${finalKey}`,
             createdAt: Date.now(),
             lastActive: Date.now()
         };
 
-        // Lưu tài khoản mới này lên Firebase để lần sau đăng nhập được
-        await fetch(url, {
+        await fetch(`${FIREBASE_URL}/admin/students/${finalKey}.json`, {
             method: 'PUT',
             body: JSON.stringify(autoAccount),
             headers: { 'Content-Type': 'application/json' }
         });
 
-        console.log("Auto-created new account for key:", trimmedKey);
         return autoAccount;
 
     } catch (e) {
-        console.error("Network/Parsing Error:", e);
-        return null;
+        console.error("Login Error:", e);
+        // Fallback cuối cùng: Trả về object tạm để bypass lỗi mạng (chỉ dùng cho local dev nếu cần)
+        return null; 
     }
 };
