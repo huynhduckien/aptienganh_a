@@ -40,17 +40,6 @@ export const saveCloudFlashcard = async (card: Flashcard): Promise<void> => {
   }
 };
 
-export const deleteCloudFlashcard = async (cardId: string): Promise<void> => {
-  if (!currentSyncKey) return;
-  try {
-    await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/flashcards/${cardId}.json`, {
-      method: 'DELETE'
-    });
-  } catch (error) {
-    console.warn("Cloud flashcard delete failed", error);
-  }
-};
-
 // --- DECKS (User Specific) ---
 
 export const fetchCloudDecks = async (): Promise<Deck[]> => {

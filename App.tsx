@@ -46,12 +46,6 @@ const App: React.FC = () => {
       setShowReview(true);
   };
 
-  const handleReviewSpecificCards = (cards: Flashcard[]) => {
-      if (cards.length === 0) return;
-      setDueCards(cards);
-      setShowReview(true);
-  };
-
   const handleSetSyncKey = async (key: string) => {
       if (!key) {
           localStorage.removeItem('paperlingo_sync_key');
@@ -100,7 +94,6 @@ const App: React.FC = () => {
 
         <Dashboard 
             onOpenFlashcards={handleStartReview}
-            onReviewCards={handleReviewSpecificCards}
             syncKey={syncKey}
             onSetSyncKey={handleSetSyncKey}
             onOpenAdmin={() => setShowAdmin(true)}

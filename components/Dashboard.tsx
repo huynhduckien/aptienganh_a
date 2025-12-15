@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AnkiStats, Deck, Flashcard } from '../types';
-import { getAnkiStats, saveFlashcard, getDecks, createDeck, deleteDeck, getCardsByDeck, getDueFlashcards, setDailyLimit, importFlashcardsFromSheet, getForgottenFlashcards } from '../services/flashcardService';
+import { getAnkiStats, saveFlashcard, getDecks, createDeck, deleteDeck, getCardsByDeck, getDueFlashcards, setDailyLimit, importFlashcardsFromSheet } from '../services/flashcardService';
 
 interface DashboardProps {
   onOpenFlashcards: (deckId?: string) => void;
-  onReviewCards: (cards: Flashcard[]) => void; // New prop to review specific list
   syncKey: string | null;
   onSetSyncKey: (key: string) => void;
   onOpenAdmin: () => void;
@@ -13,11 +12,8 @@ interface DashboardProps {
 
 // --- MICRO COMPONENTS ---
 
-const StatCard = ({ label, value, color, icon, onClick }: { label: string, value: number, color: string, icon: string, onClick?: () => void }) => (
-    <div 
-        onClick={onClick}
-        className={`flex items-center p-4 rounded-2xl border ${color} bg-white shadow-sm transition-transform hover:scale-105 ${onClick ? 'cursor-pointer' : ''}`}
-    >
+const StatCard = ({ label, value, color, icon }: { label: string, value: number, color: string, icon: string }) => (
+    <div className={`flex items-center p-4 rounded-2xl border ${color} bg-white shadow-sm transition-transform hover:scale-105`}>
         <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl bg-slate-50 mr-3 shadow-inner">
             {icon}
         </div>
@@ -75,7 +71,7 @@ const DeckCard = ({ deck, stats, onClick, onDelete }: { deck: Deck, stats: any, 
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-    onOpenFlashcards, onReviewCards, syncKey, onSetSyncKey, onOpenAdmin, dueCount
+    onOpenFlashcards, syncKey, onSetSyncKey, onOpenAdmin, dueCount
 }) => {
   const [inputKey, setInputKey] = useState('');
   const [adminMode, setAdminMode] = useState(false);
@@ -99,10 +95,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [newDeckName, setNewDeckName] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   
-  // Forgotten Cards Modal
-  const [showForgottenModal, setShowForgottenModal] = useState(false);
-  const [forgottenCards, setForgottenCards] = useState<Flashcard[]>([]);
-
   // Add Card Form
   const [newTerm, setNewTerm] = useState('');
   const [newMeaning, setNewMeaning] = useState('');
@@ -133,8 +125,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           for (const d of dList) {
               const s = await getAnkiStats(d.id);
               const due = await getDueFlashcards(d.id);
-              const forgotten = await getForgottenFlashcards(d.id);
-              dStats[d.id] = { ...s, due: due.length, forgotten: forgotten.length };
+              dStats[d.id] = { ...s, due: due.length };
           }
           setDeckStatsMap(dStats);
 
@@ -215,19 +206,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           setImportUrl('');
           refreshAllData();
       }
-  };
-
-  const handleOpenForgotten = async () => {
-      // If we are in deck view, show forgotten for that deck. Else global.
-      const deckId = viewMode === 'deckDetail' ? selectedDeck?.id : undefined;
-      const forgotten = await getForgottenFlashcards(deckId);
-      
-      if (forgotten.length === 0) {
-          alert("Tuyệt vời! Bạn không có thẻ nào đang bị quên.");
-          return;
-      }
-      setForgottenCards(forgotten);
-      setShowForgottenModal(true);
   };
 
   // Filtered Cards logic
@@ -415,13 +393,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div className="space-y-4">
                                 <StatCard label="Đã học hôm nay" value={globalStats.today.studied} color="border-blue-100" icon="📝" />
                                 <StatCard label="Thẻ thuộc bài" value={globalStats.today.matureCount} color="border-green-100" icon="🌳" />
-                                <StatCard 
-                                    label="Thẻ bị quên (Xem)" 
-                                    value={globalStats.forgotten} 
-                                    color="border-red-100 hover:border-red-300 hover:bg-red-50" 
-                                    icon="⚠️" 
-                                    onClick={handleOpenForgotten}
-                                />
+                                <StatCard label="Thẻ bị quên" value={globalStats.today.againCount} color="border-red-100" icon="⚠️" />
                                 
                                 <div className="p-4 bg-slate-50 rounded-2xl mt-6">
                                     <div className="flex justify-between text-xs font-bold text-slate-500 uppercase mb-2">
@@ -484,20 +456,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                        </button>
                   </div>
               </div>
-              
-              {/* Deck Stats Overview (Including Forgotten) */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                    <StatCard label="Thẻ cần ôn" value={deckStatsMap[selectedDeck.id]?.due || 0} color="border-indigo-100" icon="🔥" />
-                    <StatCard label="Đã thuộc" value={deckStatsMap[selectedDeck.id]?.counts.mature || 0} color="border-green-100" icon="🌳" />
-                    <StatCard 
-                        label="Bị quên (Xem)" 
-                        value={deckStatsMap[selectedDeck.id]?.forgotten || 0} 
-                        color="border-red-100 hover:border-red-300 hover:bg-red-50" 
-                        icon="⚠️" 
-                        onClick={handleOpenForgotten}
-                    />
-                    <StatCard label="Tổng số" value={deckStatsMap[selectedDeck.id]?.counts.total || 0} color="border-slate-100" icon="📦" />
-              </div>
 
               {/* Cards List Manager */}
               <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm overflow-hidden min-h-[500px] flex flex-col">
@@ -546,11 +504,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                           </td>
                                           <td className="px-6 py-4">
                                               <span className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase ${
-                                                  card.isForgotten ? 'bg-red-100 text-red-700 animate-pulse' :
                                                   card.interval >= 21 ? 'bg-green-100 text-green-700' : 
                                                   card.interval >= 1 ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
                                               }`}>
-                                                  {card.isForgotten ? 'Đang quên' : card.interval >= 21 ? 'Thành thạo' : card.interval >= 1 ? 'Đang học' : 'Mới'}
+                                                  {card.interval >= 21 ? 'Thành thạo' : card.interval >= 1 ? 'Đang học' : 'Mới'}
                                               </span>
                                           </td>
                                           <td className="px-6 py-4 text-sm font-mono text-slate-500">
@@ -564,61 +521,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
               </div>
           </div>
-      )}
-
-      {/* FORGOTTEN CARDS MODAL */}
-      {showForgottenModal && (
-           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-              <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95">
-                  <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-red-50">
-                      <div>
-                          <h3 className="font-bold text-xl text-red-800 flex items-center gap-2">
-                              <span>⚠️</span> Thẻ cần ôn lại gấp
-                          </h3>
-                          <p className="text-xs text-red-600 mt-1">Các thẻ bạn đã đánh dấu "Quên" (Again). Hãy ôn tập để loại bỏ chúng khỏi danh sách này.</p>
-                      </div>
-                      <button onClick={() => setShowForgottenModal(false)} className="w-8 h-8 rounded-full bg-white/50 hover:bg-white text-red-500 font-bold flex items-center justify-center">✕</button>
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto p-0">
-                      {forgottenCards.length === 0 ? (
-                          <div className="p-10 text-center text-slate-400">Danh sách trống.</div>
-                      ) : (
-                          <table className="w-full text-left border-collapse">
-                              <thead className="bg-slate-50 text-xs font-bold text-slate-400 uppercase">
-                                  <tr>
-                                      <th className="px-6 py-3">Thuật ngữ</th>
-                                      <th className="px-6 py-3">Nghĩa</th>
-                                      <th className="px-6 py-3">Interval</th>
-                                  </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                  {forgottenCards.map(c => (
-                                      <tr key={c.id}>
-                                          <td className="px-6 py-3 font-bold text-slate-800">{c.term}</td>
-                                          <td className="px-6 py-3 text-slate-600 text-sm">{c.meaning}</td>
-                                          <td className="px-6 py-3 text-xs font-mono text-slate-400">{c.interval < 1 ? '<1d' : Math.round(c.interval) + 'd'}</td>
-                                      </tr>
-                                  ))}
-                              </tbody>
-                          </table>
-                      )}
-                  </div>
-
-                  <div className="p-4 border-t border-slate-100 bg-white flex justify-end gap-3">
-                      <button onClick={() => setShowForgottenModal(false)} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-50 rounded-xl">Đóng</button>
-                      <button 
-                        onClick={() => {
-                            setShowForgottenModal(false);
-                            onReviewCards(forgottenCards);
-                        }}
-                        className="px-6 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200"
-                      >
-                          Ôn tập ngay ({forgottenCards.length})
-                      </button>
-                  </div>
-              </div>
-           </div>
       )}
 
       {/* CREATE DECK MODAL */}
