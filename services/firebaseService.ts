@@ -1,7 +1,7 @@
 import { Flashcard, StudentAccount, ReviewLog, DictionaryResponse, Deck } from "../types";
 
-// URL Firebase chính thức của bạn
-const FIREBASE_URL = "https://nail-schedule-test-default-rtdb.europe-west1.firebasedatabase.app/";
+// URL Firebase chính thức (Đã bỏ dấu / ở cuối để tránh lỗi double slash)
+const FIREBASE_URL = "https://nail-schedule-test-default-rtdb.europe-west1.firebasedatabase.app";
 
 let currentSyncKey: string | null = null;
 
@@ -191,11 +191,21 @@ export const getAllStudents = async (): Promise<StudentAccount[]> => {
 // Kiểm tra xem key học viên nhập có tồn tại trong hệ thống không
 export const verifyStudentKey = async (key: string): Promise<StudentAccount | null> => {
     try {
-        const response = await fetch(`${FIREBASE_URL}/admin/students/${key}.json`);
-        if (!response.ok) return null;
+        const trimmedKey = key.trim();
+        const url = `${FIREBASE_URL}/admin/students/${trimmedKey}.json`;
+        
+        console.log("Verifying key at:", url); // Log để debug
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            console.error("Firebase Error:", response.status, response.statusText);
+            return null;
+        }
+        
         const data = await response.json();
         return data || null;
     } catch (e) {
+        console.error("Network/Parsing Error:", e);
         return null;
     }
 };
