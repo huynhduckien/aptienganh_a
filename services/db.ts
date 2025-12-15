@@ -1,11 +1,14 @@
-import { Flashcard, ReviewLog, Deck } from "../types";
+
+
+import { ProcessedChunk, SavedPaper, Flashcard, ReviewLog } from "../types";
 
 const DB_NAME = 'PaperLingoDB';
-const DB_VERSION = 7; // Bump version for 'decks' store
+const DB_VERSION = 3; // Upgraded version for logs
+const STORE_PAPERS = 'papers';
 const STORE_FLASHCARDS = 'flashcards';
 const STORE_LOGS = 'review_logs';
-const STORE_DECKS = 'decks';
 
+// Hàm tạo ID an toàn
 export const generateId = (): string => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 };
@@ -16,22 +19,15 @@ const openDB = (): Promise<IDBDatabase> => {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      
-      // Cleanup old legacy store if exists
-      if (db.objectStoreNames.contains('papers')) {
-          db.deleteObjectStore('papers');
+      if (!db.objectStoreNames.contains(STORE_PAPERS)) {
+        db.createObjectStore(STORE_PAPERS, { keyPath: 'id' });
       }
-
       if (!db.objectStoreNames.contains(STORE_FLASHCARDS)) {
         db.createObjectStore(STORE_FLASHCARDS, { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains(STORE_LOGS)) {
         const logStore = db.createObjectStore(STORE_LOGS, { keyPath: 'id' });
         logStore.createIndex('timestamp', 'timestamp', { unique: false });
-      }
-      // New Decks Store
-      if (!db.objectStoreNames.contains(STORE_DECKS)) {
-        db.createObjectStore(STORE_DECKS, { keyPath: 'id' });
       }
     };
 
@@ -43,6 +39,75 @@ const openDB = (): Promise<IDBDatabase> => {
       reject((event.target as IDBOpenDBRequest).error);
     };
   });
+};
+
+// --- PAPERS ---
+
+export const savePaperToDB = async (paper: SavedPaper): Promise<void> => {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_PAPERS], 'readwrite');
+    const store = transaction.objectStore(STORE_PAPERS);
+    const request = store.put(paper);
+
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+};
+
+export const getAllPapersFromDB = async (): Promise<SavedPaper[]> => {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_PAPERS], 'readonly');
+    const store = transaction.objectStore(STORE_PAPERS);
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+        const papers = request.result as SavedPaper[];
+        papers.sort((a, b) => b.lastOpened - a.lastOpened);
+        resolve(papers);
+    };
+    request.onerror = () => reject(request.error);
+  });
+};
+
+export const getPaperFromDB = async (id: string): Promise<SavedPaper | undefined> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_PAPERS], 'readonly');
+      const store = transaction.objectStore(STORE_PAPERS);
+      const request = store.get(id);
+  
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+};
+
+export const deletePaperFromDB = async (id: string): Promise<void> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_PAPERS], 'readwrite');
+      const store = transaction.objectStore(STORE_PAPERS);
+      
+      store.delete(id);
+  
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+};
+
+export const updatePaperProgress = async (id: string, chunks: ProcessedChunk[], currentChunkIndex: number): Promise<void> => {
+    try {
+        const paper = await getPaperFromDB(id);
+        if (paper) {
+            paper.processedChunks = chunks;
+            paper.currentChunkIndex = currentChunkIndex;
+            paper.lastOpened = Date.now();
+            await savePaperToDB(paper);
+        }
+    } catch (e) {
+        console.warn("Could not update progress, paper might be deleted", e);
+    }
 };
 
 // --- FLASHCARDS ---
@@ -69,53 +134,11 @@ export const getFlashcardsFromDB = async (): Promise<Flashcard[]> => {
     });
 };
 
-export const deleteFlashcardFromDB = async (id: string): Promise<void> => {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_FLASHCARDS], 'readwrite');
-        const store = tx.objectStore(STORE_FLASHCARDS);
-        store.delete(id);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+export const updateFlashcardInDB = async (card: Flashcard): Promise<void> => {
+    return saveFlashcardToDB(card);
 };
 
-// --- DECKS ---
-
-export const saveDeckToDB = async (deck: Deck): Promise<void> => {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_DECKS], 'readwrite');
-        const store = tx.objectStore(STORE_DECKS);
-        store.put(deck);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
-};
-
-export const getDecksFromDB = async (): Promise<Deck[]> => {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_DECKS], 'readonly');
-        const store = tx.objectStore(STORE_DECKS);
-        const request = store.getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
-};
-
-export const deleteDeckFromDB = async (id: string): Promise<void> => {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_DECKS], 'readwrite');
-        const store = tx.objectStore(STORE_DECKS);
-        store.delete(id);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
-};
-
-// --- REVIEW LOGS ---
+// --- REVIEW LOGS (NEW) ---
 
 export const saveReviewLogToDB = async (log: ReviewLog): Promise<void> => {
     const db = await openDB();
@@ -139,14 +162,14 @@ export const getReviewLogsFromDB = async (): Promise<ReviewLog[]> => {
     });
 };
 
-// Helper function to clear all data (Sync logic)
+
+// NEW: Hàm xóa sạch Flashcard để dùng khi switch tài khoản
 export const clearAllFlashcardsFromDB = async (): Promise<void> => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_FLASHCARDS, STORE_LOGS, STORE_DECKS], 'readwrite');
+        const tx = db.transaction([STORE_FLASHCARDS, STORE_LOGS], 'readwrite');
         tx.objectStore(STORE_FLASHCARDS).clear();
         tx.objectStore(STORE_LOGS).clear();
-        tx.objectStore(STORE_DECKS).clear();
         
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);

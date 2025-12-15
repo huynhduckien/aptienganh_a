@@ -1,4 +1,6 @@
-import { Flashcard, StudentAccount, ReviewLog, DictionaryResponse, Deck } from "../types";
+
+
+import { Flashcard, StudentAccount, ReviewLog, DictionaryResponse } from "../types";
 
 // URL Firebase chính thức của bạn
 const FIREBASE_URL = "https://nail-schedule-test-default-rtdb.europe-west1.firebasedatabase.app/";
@@ -37,46 +39,6 @@ export const saveCloudFlashcard = async (card: Flashcard): Promise<void> => {
     });
   } catch (error) {
     console.warn("Cloud flashcard save failed", error);
-  }
-};
-
-// --- DECKS (User Specific) ---
-
-export const fetchCloudDecks = async (): Promise<Deck[]> => {
-  if (!currentSyncKey) return [];
-  try {
-    const response = await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/decks.json`);
-    if (!response.ok) return [];
-    const data = await response.json();
-    if (!data) return [];
-    return Object.values(data);
-  } catch (error) {
-    console.warn("Cloud decks fetch failed", error);
-    return [];
-  }
-};
-
-export const saveCloudDeck = async (deck: Deck): Promise<void> => {
-  if (!currentSyncKey) return;
-  try {
-    await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/decks/${deck.id}.json`, {
-      method: 'PUT',
-      body: JSON.stringify(deck),
-      headers: { 'Content-Type': 'application/json' }
-    });
-  } catch (error) {
-    console.warn("Cloud deck save failed", error);
-  }
-};
-
-export const deleteCloudDeck = async (deckId: string): Promise<void> => {
-  if (!currentSyncKey) return;
-  try {
-    await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/decks/${deckId}.json`, {
-      method: 'DELETE'
-    });
-  } catch (error) {
-      console.warn("Cloud deck delete failed", error);
   }
 };
 

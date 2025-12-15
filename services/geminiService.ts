@@ -1,202 +1,296 @@
+
+
 import { GoogleGenAI, Type } from "@google/genai";
-import { DictionaryResponse, LessonContent } from "../types";
+import { LessonContent, DictionaryResponse } from "../types";
+import { translateTextFallback } from "./translationService";
+import { fetchCloudDictionary, saveCloudDictionaryItem } from "./firebaseService";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-const MODEL_NAME = "gemini-2.5-flash"; 
+const apiKey = process.env.API_KEY;
 
+// Kiểm tra nhanh định dạng Key để cảnh báo người dùng
+if (apiKey && apiKey.startsWith('sk-')) {
+    console.error("⚠️ CẢNH BÁO: Bạn đang sử dụng OpenAI Key cho Gemini Service. Vui lòng đổi sang Google Gemini API Key (bắt đầu bằng AIza...)");
+}
+
+const genAI = new GoogleGenAI({ apiKey: apiKey || '' });
+
+// Sử dụng model 1.5 Flash (Stable & High Quota)
+const MODEL_NAME = "gemini-1.5-flash"; 
+
+// --- CACHE ---
+const CACHE_KEY = 'paperlingo_dictionary_cache_v14_gemini'; 
+let dictionaryCache = new Map<string, DictionaryResponse>();
+
+const initCache = async () => {
+    try {
+        const stored = localStorage.getItem(CACHE_KEY);
+        if (stored) dictionaryCache = new Map(JSON.parse(stored));
+    } catch (e) {}
+    if (navigator.onLine) {
+        try {
+            const cloudDict = await fetchCloudDictionary();
+            Object.values(cloudDict).forEach((item: any) => {
+                if (item.originalTerm && !dictionaryCache.has(item.originalTerm.toLowerCase())) {
+                    dictionaryCache.set(item.originalTerm.toLowerCase(), item);
+                }
+            });
+        } catch (e) {}
+    }
+};
+initCache();
+
+const saveCacheToStorage = () => {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(Array.from(dictionaryCache.entries()))); } catch (e) {}
+};
+
+// --- HELPER: JSON EXTRACTOR (Robust) ---
 const extractJSON = (text: string | undefined): any => {
     if (!text) return null;
     try {
+        // 1. Try direct parse
         return JSON.parse(text);
     } catch (e) {
+        // 2. Remove Markdown code blocks
         let clean = text.replace(/```json\s*/g, "").replace(/```\s*$/g, "").replace(/```/g, "").trim();
-        try { return JSON.parse(clean); } catch (e2) { return null; }
+        try {
+            return JSON.parse(clean);
+        } catch (e2) {
+            // 3. Try finding JSON object in text
+            const start = clean.indexOf('{');
+            const end = clean.lastIndexOf('}');
+            if (start !== -1 && end !== -1) {
+                try {
+                    return JSON.parse(clean.substring(start, end + 1));
+                } catch (e3) {
+                    return null;
+                }
+            }
+            return null;
+        }
     }
 };
 
-// Hàm tra cứu từ vựng thông minh cho tính năng Add Card
-export const lookupTermAI = async (term: string): Promise<DictionaryResponse> => {
-    try {
-        const response = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: `Dictionary Task.
-                Term: "${term}"
-                Target Language: Vietnamese (for meaning/explanation)
-                
-                Output JSON:
-                {
-                  "shortMeaning": "Nghĩa ngắn gọn (Tiếng Việt)",
-                  "phonetic": "IPA (e.g. /.../)",
-                  "detailedExplanation": "Một câu ví dụ (Tiếng Anh) và dịch nghĩa câu đó (Tiếng Việt). Ví dụ: 'Hello (Xin chào).'"
-                }`,
-            config: { 
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        shortMeaning: { type: Type.STRING },
-                        phonetic: { type: Type.STRING },
-                        detailedExplanation: { type: Type.STRING },
+const getFallbackLesson = (text: string, translatedText?: string, errorMsg?: string): LessonContent => ({
+    cleanedSourceText: text, 
+    referenceTranslation: translatedText || "Đang hiển thị bản gốc (Chế độ Offline).",
+    keyTerms: [], 
+    quiz: [],
+    source: 'Fallback'
+});
+
+const fetchVietnameseFallback = async (term: string): Promise<DictionaryResponse> => {
+    return { shortMeaning: "...", phonetic: "", detailedExplanation: "Không thể kết nối AI." };
+};
+
+// --- BATCH HELPER ---
+const splitTextIntoSafeBatches = (text: string, batchSize: number = 30000): string[] => {
+    const batches = [];
+    let currentIndex = 0;
+    while (currentIndex < text.length) {
+        let endIndex = Math.min(currentIndex + batchSize, text.length);
+        if (endIndex < text.length) {
+            const lastSafeBreak = text.lastIndexOf('\n\n', endIndex);
+            if (lastSafeBreak > currentIndex + batchSize * 0.8) {
+                endIndex = lastSafeBreak;
+            }
+        }
+        batches.push(text.substring(currentIndex, endIndex));
+        currentIndex = endIndex;
+    }
+    return batches;
+};
+
+// --- CORE FUNCTIONS ---
+
+export const structurePaperWithAI = async (rawText: string): Promise<string[]> => {
+    if (!apiKey || apiKey.startsWith('sk-')) {
+        console.warn("Invalid API Key for Gemini");
+        return [];
+    }
+
+    let batches = [rawText];
+    // Gemini 1.5 Flash has 1M context, but we limit batch size to ensure output fits in 8k tokens
+    if (rawText.length > 80000) {
+        batches = splitTextIntoSafeBatches(rawText, 40000);
+    }
+
+    const allSections: string[] = [];
+
+    for (let i = 0; i < batches.length; i++) {
+        const batchText = batches[i];
+        
+        try {
+            const response = await genAI.models.generateContent({
+                model: MODEL_NAME,
+                contents: [
+                    {
+                        role: 'user',
+                        parts: [
+                            { text: `You are an Academic Editor. Clean and restructure this text.
+                            
+                            Rules:
+                            1. Remove header/footer garbage (e.g. "Downloaded from...", page numbers).
+                            2. Merge broken paragraphs.
+                            3. Identify main sections (Introduction, Methods, Results, Discussion, Conclusion).
+                            4. PRESERVE Appendices and Glossaries if found (Label as ## APPENDIX A).
+                            5. Output JSON: { "sections": ["string 1", "string 2"] }
+                            
+                            Text:
+                            """${batchText}"""` }
+                        ]
+                    }
+                ],
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: Type.OBJECT,
+                        properties: {
+                            sections: {
+                                type: Type.ARRAY,
+                                items: { type: Type.STRING }
+                            }
+                        }
                     }
                 }
+            });
+
+            const data = extractJSON(response.text);
+            
+            if (data && data.sections && Array.isArray(data.sections)) {
+                allSections.push(...data.sections);
+            } else {
+                 allSections.push(batchText); 
             }
-        });
-        
-        const data = extractJSON(response.text);
-        
-        return {
-            shortMeaning: data?.shortMeaning || "...",
-            phonetic: (data?.phonetic || "").replace(/\//g, ''),
-            detailedExplanation: data?.detailedExplanation || "",
-            originalTerm: term
-        };
-
-    } catch (e) {
-        console.error("Gemini Lookup Failed", e);
-        return { shortMeaning: "", phonetic: "", detailedExplanation: "Lỗi kết nối AI.", originalTerm: term };
-    }
-};
-
-export const structurePaperWithAI = async (text: string): Promise<string[]> => {
-    try {
-        const response = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: `You are an expert academic paper editor.
-            Task: Organize the following raw text from a PDF into clear, coherent reading sections.
-            1. Remove noise (page numbers, running headers, references lists, copyright info).
-            2. Group related paragraphs into logical sections (Introduction, Methods, Results, etc.).
-            3. If a section is very long, split it into smaller logical parts (approx 300-500 words).
-            4. Return the result as a JSON array of strings, where each string is a section content.
-            5. Add a Markdown header (e.g., ## Introduction) at the start of each section if applicable.
-
-            Raw Text:
-            ${text.substring(0, 50000)}`, // Limit context if necessary, though 2.5 Flash has large context
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                }
-            }
-        });
-        const json = extractJSON(response.text);
-        if (Array.isArray(json)) return json;
-        return [];
-    } catch (e) {
-        console.warn("AI Structure failed", e);
-        return [];
-    }
-};
-
-export const generateLessonForChunk = async (text: string, language: 'en' | 'zh'): Promise<LessonContent> => {
-    try {
-        const prompt = `
-        Task: Create a language learning lesson from this text.
-        Target Language for explanation: Vietnamese.
-        Source Text (${language === 'en' ? 'English' : 'Traditional Chinese'}): "${text}"
-
-        1. Clean the source text (remove citations like [1], (Smith 2020), typos, line breaks).
-        2. Translate the cleaned text into natural Vietnamese.
-        3. Create 3 reading comprehension quiz questions (in Vietnamese) based on the text.
-
-        Output JSON:
-        {
-            "cleanedSourceText": "...",
-            "referenceTranslation": "...",
-            "quiz": [
-                {
-                    "question": "...",
-                    "options": ["A...", "B...", "C...", "D..."],
-                    "correctAnswer": 0, // Index 0-3
-                    "explanation": "..."
-                }
-            ]
+        } catch (e) {
+            console.warn(`Batch ${i+1} Gemini structure failed.`, e);
+            allSections.push(batchText);
         }
-        `;
+    }
+    
+    return allSections.filter(s => s && s.length > 50);
+};
 
-        const response = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        cleanedSourceText: { type: Type.STRING },
-                        referenceTranslation: { type: Type.STRING },
-                        quiz: {
-                            type: Type.ARRAY,
-                            items: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    question: { type: Type.STRING },
-                                    options: { type: Type.ARRAY, items: { type: Type.STRING } },
-                                    correctAnswer: { type: Type.INTEGER },
-                                    explanation: { type: Type.STRING }
-                                }
+export const generateLessonForChunk = async (textChunk: string, language: 'en' | 'zh' = 'en'): Promise<LessonContent> => {
+  if (!apiKey || apiKey.startsWith('sk-')) return getFallbackLesson(textChunk, "Cần Google API Key.");
+
+  try {
+    const isChinese = language === 'zh';
+    
+    const prompt = isChinese
+        ? `Task: Create a Traditional Chinese learning lesson.
+           Input Text: """${textChunk}"""
+           Output JSON:
+           {
+             "cleanedSourceText": "Cleaned text",
+             "referenceTranslation": "Vietnamese translation",
+             "keyTerms": [{ "term": "Chinese Word", "meaning": "Vietnamese" }],
+             "quiz": [{ "question": "Question in Chinese", "options": ["A", "B", "C"], "correctAnswer": 0, "explanation": "Explanation in Chinese" }]
+           }`
+        : `Task: Create an Academic English lesson.
+           Input Text: """${textChunk}"""
+           Output JSON:
+           {
+             "cleanedSourceText": "Cleaned text (remove citations like [1])",
+             "referenceTranslation": "Vietnamese translation (natural, academic style)",
+             "keyTerms": [{ "term": "English Term", "meaning": "Vietnamese Meaning" }],
+             "quiz": [{ "question": "Question in English", "options": ["A", "B", "C"], "correctAnswer": 0, "explanation": "Explanation in English" }]
+           }`;
+
+    const response = await genAI.models.generateContent({
+        model: MODEL_NAME,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    cleanedSourceText: { type: Type.STRING },
+                    referenceTranslation: { type: Type.STRING },
+                    keyTerms: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                term: { type: Type.STRING },
+                                meaning: { type: Type.STRING }
+                            }
+                        }
+                    },
+                    quiz: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                question: { type: Type.STRING },
+                                options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                correctAnswer: { type: Type.INTEGER },
+                                explanation: { type: Type.STRING }
                             }
                         }
                     }
                 }
             }
-        });
+        }
+    });
 
-        const data = extractJSON(response.text);
-        return {
-            cleanedSourceText: data?.cleanedSourceText || text,
-            referenceTranslation: data?.referenceTranslation || "",
-            quiz: data?.quiz || [],
-            source: 'AI'
-        };
-    } catch (e) {
-         console.error("Generate Lesson Failed", e);
-         return {
-             cleanedSourceText: text,
-             referenceTranslation: "Lỗi kết nối AI hoặc hết quota.",
-             quiz: [],
-             source: 'Fallback'
-         };
-    }
+    const data = extractJSON(response.text);
+    if (!data || !data.cleanedSourceText) throw new Error("Invalid JSON");
+
+    return {
+        cleanedSourceText: data.cleanedSourceText,
+        referenceTranslation: data.referenceTranslation,
+        keyTerms: data.keyTerms || [],
+        quiz: data.quiz || [],
+        source: 'AI'
+    };
+
+  } catch (error) {
+      console.warn("Gemini Lesson Gen Failed.", error);
+      try {
+          const translated = await translateTextFallback(textChunk);
+          return getFallbackLesson(textChunk, translated);
+      } catch (e) {
+          return getFallbackLesson(textChunk);
+      }
+  }
 };
 
-export const explainPhrase = async (phrase: string, context: string): Promise<DictionaryResponse> => {
+export const explainPhrase = async (phrase: string, fullContext: string): Promise<DictionaryResponse> => {
+    if (dictionaryCache.has(phrase.toLowerCase())) {
+        return dictionaryCache.get(phrase.toLowerCase())!;
+    }
+    
+    if (!apiKey || apiKey.startsWith('sk-')) return fetchVietnameseFallback(phrase);
+
     try {
-        const prompt = `
-        Task: Explain the phrase/word "${phrase}" found in this context: "${context.substring(0, 500)}...".
-        Target Language: Vietnamese.
-
-        Output JSON:
-        {
-            "shortMeaning": "Meaning in Vietnamese",
-            "phonetic": "IPA",
-            "detailedExplanation": "English definition + Example sentence with Vietnamese translation."
-        }
-        `;
-
-        const response = await ai.models.generateContent({
+        const response = await genAI.models.generateContent({
             model: MODEL_NAME,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        shortMeaning: { type: Type.STRING },
-                        phonetic: { type: Type.STRING },
-                        detailedExplanation: { type: Type.STRING }
-                    }
-                }
-            }
+            contents: [{
+                role: 'user',
+                parts: [{ text: `Explain term: "${phrase}" in context: "${fullContext}".
+                Output JSON:
+                {
+                  "shortMeaning": "Vietnamese concise meaning",
+                  "phonetic": "IPA",
+                  "detailedExplanation": "Detailed Vietnamese explanation (2 sentences)"
+                }` }]
+            }],
+            config: { responseMimeType: "application/json" }
         });
-
+        
         const data = extractJSON(response.text);
-        return {
-            shortMeaning: data?.shortMeaning || "...",
-            phonetic: data?.phonetic || "",
-            detailedExplanation: data?.detailedExplanation || "",
+        const result: DictionaryResponse = {
+            shortMeaning: data.shortMeaning || "...",
+            phonetic: (data.phonetic || "").replace(/\//g, ''),
+            detailedExplanation: data.detailedExplanation || "...",
             originalTerm: phrase
         };
+
+        dictionaryCache.set(phrase.toLowerCase(), result);
+        saveCacheToStorage();
+        saveCloudDictionaryItem(phrase, result);
+        return result;
     } catch (e) {
-        return { shortMeaning: "", phonetic: "", detailedExplanation: "Lỗi kết nối AI.", originalTerm: phrase };
+        return fetchVietnameseFallback(phrase);
     }
 };

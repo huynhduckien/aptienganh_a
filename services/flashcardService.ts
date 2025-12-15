@@ -1,6 +1,7 @@
-import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint, AnkiStats, Deck } from "../types";
-import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB, saveDeckToDB, getDecksFromDB, deleteDeckFromDB, deleteFlashcardFromDB } from "./db";
-import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey, fetchCloudReviewLogs, saveCloudReviewLog, fetchCloudDecks, saveCloudDeck, deleteCloudDeck } from "./firebaseService";
+
+import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint, AnkiStats } from "../types";
+import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB } from "./db";
+import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey, fetchCloudReviewLogs, saveCloudReviewLog } from "./firebaseService";
 
 let hasSynced = false;
 
@@ -39,17 +40,10 @@ export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     hasSynced = false;
 
     // 1. Tải Flashcards
+    // (Logic getFlashcards sẽ tự gọi fetchCloudFlashcards vì hasSynced = false)
     await getFlashcards(); 
 
-    // 2. Tải Decks
-    try {
-        const cloudDecks = await fetchCloudDecks();
-        for (const deck of cloudDecks) {
-            await saveDeckToDB(deck);
-        }
-    } catch(e) { console.warn("Sync Decks Error", e); }
-
-    // 3. Tải Review Logs (Lịch sử học) để vẽ biểu đồ
+    // 2. Tải Review Logs (Lịch sử học) để vẽ biểu đồ
     try {
         const cloudLogs = await fetchCloudReviewLogs();
         if (cloudLogs && cloudLogs.length > 0) {
@@ -62,50 +56,6 @@ export const setSyncKeyAndSync = async (key: string): Promise<void> => {
         console.warn("Failed to sync review logs", e);
     }
 };
-
-// --- DECKS MANAGEMENT ---
-
-export const createDeck = async (name: string, description?: string): Promise<Deck> => {
-    const deck: Deck = {
-        id: generateId(),
-        name,
-        description,
-        createdAt: Date.now()
-    };
-    await saveDeckToDB(deck);
-    saveCloudDeck(deck);
-    return deck;
-};
-
-export const getDecks = async (): Promise<Deck[]> => {
-    // Sync logic handled in setSyncKeyAndSync mostly, but can add detailed sync here if needed
-    // For now, trust DB first
-    return await getDecksFromDB();
-};
-
-export const deleteDeck = async (deckId: string): Promise<void> => {
-    // 1. Delete Deck Metadata
-    await deleteDeckFromDB(deckId);
-    deleteCloudDeck(deckId);
-
-    // 2. Delete All Cards in Deck
-    const allCards = await getFlashcards();
-    const cardsInDeck = allCards.filter(c => c.deckId === deckId);
-    
-    for (const card of cardsInDeck) {
-        // Technically we could soft delete or move to "Uncategorized"
-        // But strict deletion is safer for now
-        await deleteFlashcardFromDB(card.id);
-        // We probably need a deleteCloudFlashcard method, but let's leave it for now (cards become orphaned in cloud)
-    }
-};
-
-export const getCardsByDeck = async (deckId: string): Promise<Flashcard[]> => {
-    const cards = await getFlashcards();
-    return cards.filter(c => c.deckId === deckId);
-};
-
-// --- FLASHCARDS ---
 
 export const getFlashcards = async (): Promise<Flashcard[]> => {
   try {
@@ -154,8 +104,8 @@ export const getFlashcards = async (): Promise<Flashcard[]> => {
 export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'nextReview' | 'createdAt' | 'easeFactor' | 'interval' | 'repetitions'>): Promise<boolean> => {
   const cards = await getFlashcards();
   
-  if (cards.some(c => c.term.toLowerCase() === card.term.toLowerCase() && c.deckId === card.deckId)) {
-    return false; // Prevent duplicates in SAME deck (or global if deck undefined)
+  if (cards.some(c => c.term.toLowerCase() === card.term.toLowerCase())) {
+    return false; 
   }
 
   const newCard: Flashcard = {
@@ -218,7 +168,7 @@ const parseCSV = (text: string): string[][] => {
     return rows;
 };
 
-export const importFlashcardsFromSheet = async (sheetUrl: string, deckId?: string): Promise<{ added: number, total: number, error?: string }> => {
+export const importFlashcardsFromSheet = async (sheetUrl: string): Promise<{ added: number, total: number, error?: string }> => {
     try {
         // 1. Extract Spreadsheet ID
         const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
@@ -275,8 +225,7 @@ export const importFlashcardsFromSheet = async (sheetUrl: string, deckId?: strin
                     term,
                     meaning,
                     phonetic,
-                    explanation,
-                    deckId // Pass deckId
+                    explanation
                 });
                 if (success) addedCount++;
             }
@@ -312,17 +261,13 @@ const getStudiedCountToday = async (): Promise<number> => {
     return logs.filter(l => l.timestamp >= todayTs).length;
 };
 
-// UPDATED: Supports filtering by deckId
-export const getDueFlashcards = async (deckId?: string): Promise<Flashcard[]> => {
+export const getDueFlashcards = async (): Promise<Flashcard[]> => {
   const cards = await getFlashcards();
   const now = Date.now();
   const limit = getDailyLimit();
   
-  // Filter by Deck if provided
-  let activeCards = cards.filter(card => card.interval < 10000);
-  if (deckId) {
-      activeCards = activeCards.filter(c => c.deckId === deckId);
-  }
+  // Filter out cards that are "Mastered" (Interval > 10000 days from Easy button)
+  const activeCards = cards.filter(card => card.interval < 10000);
 
   // FIX: Sắp xếp ưu tiên thẻ Learning/Again lên đầu để không bị mất khi cắt giới hạn
   const allDue = activeCards.filter(card => card.nextReview <= now).sort((a,b) => {
@@ -337,11 +282,11 @@ export const getDueFlashcards = async (deckId?: string): Promise<Flashcard[]> =>
       return a.nextReview - b.nextReview;
   });
   
-  // Global Limit applies globally. If reviewing specific deck, we might want to relax this?
-  // For now, let's keep daily limit global.
   const studiedToday = await getStudiedCountToday();
   const remainingQuota = Math.max(0, limit - studiedToday);
   
+  // Lưu ý: Nếu có thẻ Learning, chúng ta có thể cân nhắc luôn hiển thị chúng bất kể limit
+  // Ở đây tôi giữ logic cắt theo limit nhưng vì đã sort Learning lên đầu nên chúng sẽ được lấy trước
   return allDue.slice(0, remainingQuota);
 };
 
@@ -361,19 +306,40 @@ export const getForgottenCardsToday = async (): Promise<Flashcard[]> => {
     return cards.filter(c => forgottenIds.has(c.id));
 };
 
-// --- ANKI STATS GENERATOR (Supports Deck Filtering) ---
-export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
-    let cards = await getFlashcards();
-    let logs = await getReviewLogsFromDB();
+export const getFlashcardStats = async (): Promise<FlashcardStats> => {
+    const cards = await getFlashcards();
     const now = Date.now();
+    const limit = getDailyLimit();
+    
+    // Filter active vs mastered
+    const activeCards = cards.filter(c => c.interval < 10000);
+    const masteredCards = cards.filter(c => c.interval >= 10000);
 
-    // Filter by Deck
-    if (deckId) {
-        cards = cards.filter(c => c.deckId === deckId);
-        // Optimization: Filter logs by card IDs in this deck
-        const cardIds = new Set(cards.map(c => c.id));
-        logs = logs.filter(l => cardIds.has(l.cardId));
-    }
+    const allDue = activeCards.filter(c => c.nextReview <= now);
+    const studiedToday = await getStudiedCountToday();
+    
+    const remainingQuota = Math.max(0, limit - studiedToday);
+    const backlog = Math.max(0, allDue.length - remainingQuota);
+
+    return {
+        total: cards.length,
+        due: allDue.length, 
+        new: activeCards.filter(c => c.repetitions === 0).length,
+        learning: activeCards.filter(c => c.repetitions > 0 && c.interval < 21).length, 
+        review: activeCards.filter(c => c.interval >= 21).length,
+        mastered: masteredCards.length,
+        
+        studiedToday,
+        dailyLimit: limit,
+        backlog
+    };
+};
+
+// --- ANKI STATS GENERATOR ---
+export const getAnkiStats = async (): Promise<AnkiStats> => {
+    const cards = await getFlashcards();
+    const logs = await getReviewLogsFromDB();
+    const now = Date.now();
     
     // 1. TODAY
     const startOfDay = new Date();
