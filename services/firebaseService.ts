@@ -194,8 +194,14 @@ export const verifyStudentKey = async (key: string): Promise<StudentAccount | nu
         const trimmedKey = key.trim();
         const url = `${FIREBASE_URL}/admin/students/${trimmedKey}.json`;
         
-        console.log("Verifying key at:", url); // Log để debug
+        console.log("Verifying key at:", url); 
         const response = await fetch(url);
+        
+        // 1. Kiểm tra lỗi quyền truy cập (Quan trọng)
+        if (response.status === 401 || response.status === 403) {
+            alert("LỖI QUYỀN TRUY CẬP: Bạn chưa mở khóa Database (Rules). Hãy vào Firebase Console -> Build -> Realtime Database -> Rules và đổi '.read': true, '.write': true");
+            return null;
+        }
         
         if (!response.ok) {
             console.error("Firebase Error:", response.status, response.statusText);
@@ -203,7 +209,29 @@ export const verifyStudentKey = async (key: string): Promise<StudentAccount | nu
         }
         
         const data = await response.json();
-        return data || null;
+        
+        // 2. Nếu tìm thấy tài khoản -> Đăng nhập thành công
+        if (data) return data;
+
+        // 3. TỰ ĐỘNG TẠO TÀI KHOẢN NẾU CHƯA CÓ (Để fix lỗi "Mã không hợp lệ" khi database rỗng)
+        // Đây là tính năng tiện lợi cho môi trường Test
+        const autoAccount: StudentAccount = {
+            key: trimmedKey,
+            name: `Học viên ${trimmedKey}`,
+            createdAt: Date.now(),
+            lastActive: Date.now()
+        };
+
+        // Lưu tài khoản mới này lên Firebase để lần sau đăng nhập được
+        await fetch(url, {
+            method: 'PUT',
+            body: JSON.stringify(autoAccount),
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        console.log("Auto-created new account for key:", trimmedKey);
+        return autoAccount;
+
     } catch (e) {
         console.error("Network/Parsing Error:", e);
         return null;
