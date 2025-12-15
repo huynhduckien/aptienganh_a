@@ -9,10 +9,9 @@ interface FlashcardReviewProps {
   onUpdate: () => void;
 }
 
-export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: initialCards, onClose, onUpdate }) => {
+export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: dueCards, onClose, onUpdate }) => {
   const [view, setView] = useState<'overview' | 'review' | 'summary'>('overview');
-  // FIX: Chỉ khởi tạo queue một lần từ initialCards, không update lại khi props thay đổi để tránh reset giữa chừng
-  const [queue, setQueue] = useState<Flashcard[]>(initialCards);
+  const [queue, setQueue] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [stats, setStats] = useState<AnkiStats | null>(null);
@@ -36,8 +35,8 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: initial
 
   useEffect(() => {
     refreshStats();
-    // FIX: Removed setQueue(dueCards) dependency to prevent auto-switching
-  }, []);
+    setQueue(dueCards);
+  }, [dueCards]);
 
   const refreshStats = async () => {
       try {
@@ -92,8 +91,7 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: initial
           setDailyLimit(val);
           setIsEditingLimit(false);
           refreshStats();
-          // Note: Changing limit inside review won't update current queue immediately to avoid confusion
-          // user needs to reopen review to see new limit effect
+          onUpdate(); // Re-fetch due cards
       }
   };
 

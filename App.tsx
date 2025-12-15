@@ -46,7 +46,8 @@ const App: React.FC = () => {
     }
     loadPapers();
     if (!storedKey) getFlashcards().then(() => updateDueCount());
-    // FIX: Removed setInterval that was causing flashcard reset
+    const interval = setInterval(updateDueCount, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleSetSyncKey = async (key: string) => {
@@ -257,6 +258,7 @@ const App: React.FC = () => {
                 papers={papers}
                 onOpenPaper={openSavedPaper}
                 onDeletePaper={handleDeletePaper}
+                onNewPaper={() => setAppState('upload')}
                 onOpenFlashcards={() => setShowFlashcards(true)}
                 syncKey={syncKey}
                 onSetSyncKey={handleSetSyncKey}
@@ -384,7 +386,7 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {showFlashcards && <FlashcardReview cards={dueCards} onClose={() => { setShowFlashcards(false); updateDueCount(); }} onUpdate={updateDueCount} />}
+      {showFlashcards && <FlashcardReview cards={dueCards} onClose={() => setShowFlashcards(false)} onUpdate={updateDueCount} />}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
     </div>
   );

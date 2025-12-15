@@ -269,24 +269,11 @@ export const getDueFlashcards = async (): Promise<Flashcard[]> => {
   // Filter out cards that are "Mastered" (Interval > 10000 days from Easy button)
   const activeCards = cards.filter(card => card.interval < 10000);
 
-  // FIX: Sắp xếp ưu tiên thẻ Learning/Again lên đầu để không bị mất khi cắt giới hạn
-  const allDue = activeCards.filter(card => card.nextReview <= now).sort((a,b) => {
-      // 1. Ưu tiên thẻ đang học dở (interval < 1 ngày) hoặc thẻ Again
-      const aIsLearning = a.interval < 1;
-      const bIsLearning = b.interval < 1;
-      
-      if (aIsLearning && !bIsLearning) return -1; // a lên đầu
-      if (!aIsLearning && bIsLearning) return 1;  // b lên đầu
-      
-      // 2. Nếu cùng loại thì sắp xếp theo thời gian hết hạn (cũ nhất lên trước)
-      return a.nextReview - b.nextReview;
-  });
+  const allDue = activeCards.filter(card => card.nextReview <= now).sort((a,b) => a.nextReview - b.nextReview);
   
   const studiedToday = await getStudiedCountToday();
   const remainingQuota = Math.max(0, limit - studiedToday);
   
-  // Lưu ý: Nếu có thẻ Learning, chúng ta có thể cân nhắc luôn hiển thị chúng bất kể limit
-  // Ở đây tôi giữ logic cắt theo limit nhưng vì đã sort Learning lên đầu nên chúng sẽ được lấy trước
   return allDue.slice(0, remainingQuota);
 };
 
