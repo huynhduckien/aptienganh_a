@@ -381,9 +381,6 @@ export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
     const todayTs = startOfDay.getTime();
     const todayLogs = logs.filter(l => l.timestamp >= todayTs);
     
-    // Calculate due count for display purposes in stats (without limit trimming)
-    const rawDueCount = cards.filter(c => c.interval < 10000 && c.nextReview <= now).length;
-
     const todayStats = {
         studied: todayLogs.length,
         limit: getDailyLimit(),
@@ -475,9 +472,8 @@ export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
             labels: forecastLabels,
             maxTotal: maxForecast 
         },
-        intervals: { data: intervalBuckets, labels: intervalLabels },
-        due: rawDueCount // Add due property to return type logic
-    } as any;
+        intervals: { data: intervalBuckets, labels: intervalLabels }
+    };
 };
 
 // --- PREVIEW HELPER ---
