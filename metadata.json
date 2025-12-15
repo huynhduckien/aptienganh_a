@@ -1,5 +1,5 @@
 {
-  "name": "Luyen dich",
-  "description": "Biến các bài báo nghiên cứu (PDF) thành các bài học tiếng Anh tương tác, chia nhỏ nội dung để dễ đọc và kèm theo bài tập trắc nghiệm.",
+  "name": "Flashcard Master",
+  "description": "Hệ thống học từ vựng SRS thông minh.",
   "requestFramePermissions": []
 }
