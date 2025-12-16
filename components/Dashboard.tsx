@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AnkiStats, Deck, Flashcard } from '../types';
-import { getAnkiStats, saveFlashcard, getDecks, createDeck, deleteDeck, getCardsByDeck, getDueFlashcards, setDailyLimit, importFlashcardsFromSheet, getForgottenFlashcards } from '../services/flashcardService';
+import { getAnkiStats, saveFlashcard, getDecks, createDeck, deleteDeck, getCardsByDeck, getDueFlashcards, setDailyLimit, getDailyLimit, importFlashcardsFromSheet, getForgottenFlashcards } from '../services/flashcardService';
 
 interface DashboardProps {
   onOpenFlashcards: (deckId?: string) => void;
@@ -104,6 +104,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [showForgottenModal, setShowForgottenModal] = useState(false);
   const [forgottenCards, setForgottenCards] = useState<Flashcard[]>([]);
 
+  // Daily Limit Modal
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [tempLimit, setTempLimit] = useState(50);
+
   // Add Card Form
   const [newTerm, setNewTerm] = useState('');
   const [newMeaning, setNewMeaning] = useState('');
@@ -129,6 +133,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       try {
           const gStats = await getAnkiStats();
           setGlobalStats(gStats);
+          setTempLimit(getDailyLimit()); // Sync local state with storage
           
           const dList = await getDecks();
           setDecks(dList);
@@ -232,6 +237,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
       setForgottenCards(forgotten);
       setShowForgottenModal(true);
+  };
+  
+  const handleSaveGoal = () => {
+      setDailyLimit(tempLimit);
+      setShowGoalModal(false);
+      // Trigger a refresh to update "dueCount" based on new limit
+      // We need to wait a tick or manually trigger update from parent if possible,
+      // but here refreshing local data is a good start. 
+      // Note: `dueCount` prop comes from parent, so we might need to tell App to update.
+      // Ideally, the Dashboard should manage its own data fetching or we trigger a callback.
+      // Since `dueCount` is passed down, we'll reload data here which might not update the prop immediately,
+      // but `refreshAllData` updates `globalStats` which IS used for some displays.
+      // To update the main Badge, we rely on the parent re-rendering or user interaction.
+      // A full page reload is a brute force way, but let's try just refreshing data first.
+      refreshAllData();
+      // Also force parent update via a hack or callback if available? 
+      // The parent passes `dueCount`. Let's assume the user starts reviewing or reloads if they want the badge updated.
+      // Or better, we can add a callback to parent if strictly needed. For now, local stats update is fine.
+      alert(`Đã cập nhật mục tiêu: ${tempLimit} thẻ/ngày`);
+      window.location.reload(); // Simple reload to sync everything perfectly for now
   };
 
   // Filtered Cards logic
@@ -340,6 +365,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div className="flex items-center gap-3">
               <button 
+                  onClick={() => setShowGoalModal(true)}
+                  className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 hover:text-indigo-600 transition-colors text-sm flex items-center gap-2"
+                  title="Đặt mục tiêu hàng ngày"
+              >
+                  <span>🎯</span> <span className="hidden sm:inline">Mục tiêu</span>
+              </button>
+              <button 
                   onClick={() => { if(confirm('Đăng xuất?')) onSetSyncKey(''); }}
                   className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 hover:text-red-500 transition-colors text-sm"
               >
@@ -364,7 +396,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                   <span className="text-sm font-bold uppercase tracking-wider">Tổng quan hôm nay</span>
                               </div>
                               <div className="text-6xl md:text-7xl font-black tracking-tight mb-2">{dueCount}</div>
-                              <div className="text-lg font-medium text-indigo-100">thẻ cần ôn tập trên tất cả bộ thẻ</div>
+                              <div className="text-lg font-medium text-indigo-100 flex items-center gap-2">
+                                  <span>thẻ cần ôn tập</span>
+                                  {globalStats && (
+                                      <span className="text-sm bg-white/20 px-2 py-0.5 rounded-lg border border-white/20">
+                                          Đã học: {globalStats.today.studied}/{globalStats.today.limit}
+                                      </span>
+                                  )}
+                              </div>
                           </div>
                           
                           {dueCount > 0 ? (
@@ -594,6 +633,64 @@ export const Dashboard: React.FC<DashboardProps> = ({
       )}
 
       {/* MODALS RENDER (Create Deck, Import Sheet, Add Card, Forgotten) - Code omitted for brevity as they are identical to previous version, just kept in context */}
+      {showGoalModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+              <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+                  <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-6 text-white text-center">
+                      <div className="text-4xl mb-2">🎯</div>
+                      <h3 className="text-2xl font-black">Mục tiêu học tập</h3>
+                      <p className="opacity-90 text-sm">Giới hạn số thẻ ôn tập mỗi ngày để tránh quá tải.</p>
+                  </div>
+                  
+                  <div className="p-8">
+                      <div className="text-center mb-8">
+                          <span className="text-6xl font-black text-slate-800">{tempLimit}</span>
+                          <span className="text-slate-400 font-bold ml-2">thẻ/ngày</span>
+                      </div>
+
+                      <div className="mb-8">
+                          <input 
+                              type="range" 
+                              min="10" max="200" step="10"
+                              value={tempLimit}
+                              onChange={(e) => setTempLimit(parseInt(e.target.value))}
+                              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          />
+                          <div className="flex justify-between text-xs font-bold text-slate-400 mt-2">
+                              <span>10 thẻ</span>
+                              <span>200 thẻ</span>
+                          </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3 mb-8">
+                          <button onClick={() => setTempLimit(20)} className={`py-2 rounded-xl text-xs font-bold border ${tempLimit === 20 ? 'bg-green-100 border-green-500 text-green-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                              🌱 Nhẹ nhàng
+                          </button>
+                          <button onClick={() => setTempLimit(50)} className={`py-2 rounded-xl text-xs font-bold border ${tempLimit === 50 ? 'bg-blue-100 border-blue-500 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                              💧 Tiêu chuẩn
+                          </button>
+                          <button onClick={() => setTempLimit(100)} className={`py-2 rounded-xl text-xs font-bold border ${tempLimit === 100 ? 'bg-orange-100 border-orange-500 text-orange-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                              🔥 Chăm chỉ
+                          </button>
+                      </div>
+
+                      <button 
+                          onClick={handleSaveGoal}
+                          className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 shadow-lg transition-all active:scale-95"
+                      >
+                          Lưu thay đổi
+                      </button>
+                      <button 
+                          onClick={() => setShowGoalModal(false)}
+                          className="w-full py-3 mt-3 text-slate-400 font-bold hover:text-slate-600 transition-colors"
+                      >
+                          Đóng
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {showForgottenModal && (
            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
               <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95">
