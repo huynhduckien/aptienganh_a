@@ -1,7 +1,10 @@
+
 import { Flashcard, StudentAccount, ReviewLog, DictionaryResponse, Deck } from "../types";
 
-// URL Firebase chính thức của bạn
-const FIREBASE_URL = "https://nail-schedule-test-default-rtdb.europe-west1.firebasedatabase.app/";
+// --- CẤU HÌNH FIREBASE ---
+// TODO: Thay thế URL bên dưới bằng URL Realtime Database của chính bạn.
+// QUAN TRỌNG: Không được để dấu gạch chéo (/) ở cuối cùng.
+const FIREBASE_URL = "https://nail-schedule-test-default-rtdb.europe-west1.firebasedatabase.app"; 
 
 let currentSyncKey: string | null = null;
 
@@ -14,8 +17,12 @@ export const setFirebaseSyncKey = (key: string) => {
 export const fetchCloudFlashcards = async (): Promise<Flashcard[]> => {
   if (!currentSyncKey) return []; // Không có key thì không load
   try {
+    // URL sẽ là: https://...app/users/...
     const response = await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/flashcards.json`);
-    if (!response.ok) return [];
+    if (!response.ok) {
+        console.error(`Firebase Error: ${response.status} ${response.statusText}`);
+        return [];
+    }
     
     const data = await response.json();
     if (!data) return [];
@@ -30,11 +37,12 @@ export const fetchCloudFlashcards = async (): Promise<Flashcard[]> => {
 export const saveCloudFlashcard = async (card: Flashcard): Promise<void> => {
   if (!currentSyncKey) return;
   try {
-    await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/flashcards/${card.id}.json`, {
+    const response = await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/flashcards/${card.id}.json`, {
       method: 'PUT',
       body: JSON.stringify(card),
       headers: { 'Content-Type': 'application/json' }
     });
+    if (!response.ok) console.error("Save Cloud Card Failed", response.statusText);
   } catch (error) {
     console.warn("Cloud flashcard save failed", error);
   }
@@ -166,13 +174,15 @@ export const createStudentAccount = async (name: string): Promise<StudentAccount
     };
 
     try {
-        await fetch(`${FIREBASE_URL}/admin/students/${key}.json`, {
+        const response = await fetch(`${FIREBASE_URL}/admin/students/${key}.json`, {
             method: 'PUT',
             body: JSON.stringify(newStudent),
             headers: { 'Content-Type': 'application/json' }
         });
+        if (!response.ok) throw new Error("Firebase error");
         return newStudent;
     } catch (e) {
+        console.error(e);
         throw new Error("Không thể tạo tài khoản học viên");
     }
 };
@@ -192,10 +202,14 @@ export const getAllStudents = async (): Promise<StudentAccount[]> => {
 export const verifyStudentKey = async (key: string): Promise<StudentAccount | null> => {
     try {
         const response = await fetch(`${FIREBASE_URL}/admin/students/${key}.json`);
-        if (!response.ok) return null;
+        if (!response.ok) {
+            console.error("Verify Key Failed:", response.status, response.statusText);
+            return null;
+        }
         const data = await response.json();
         return data || null;
     } catch (e) {
+        console.error("Verify Key Network Error:", e);
         return null;
     }
 };

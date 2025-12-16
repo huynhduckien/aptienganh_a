@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Flashcard, ReviewRating } from '../types';
 import { updateCardStatus, getIntervalPreviewText } from '../services/flashcardService';
@@ -15,6 +16,21 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: initial
   const [finished, setFinished] = useState(false);
   const [startTime, setStartTime] = useState(Date.now());
 
+  // Navigation Logic
+  const handleNext = useCallback(() => {
+      if (currentIndex < queue.length - 1) {
+          setIsFlipped(false);
+          setCurrentIndex(prev => prev + 1);
+      }
+  }, [currentIndex, queue.length]);
+
+  const handlePrev = useCallback(() => {
+      if (currentIndex > 0) {
+          setIsFlipped(false);
+          setCurrentIndex(prev => prev - 1);
+      }
+  }, [currentIndex]);
+
   // Keyboard Shortcuts
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
       if (finished) return;
@@ -22,7 +38,14 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: initial
       switch (event.code) {
           case 'Space':
           case 'Enter':
-              if (!isFlipped) setIsFlipped(true);
+              // Toggle flip state instead of just setting true
+              setIsFlipped(prev => !prev);
+              break;
+          case 'ArrowLeft':
+              handlePrev();
+              break;
+          case 'ArrowRight':
+              handleNext();
               break;
           case 'Digit1':
           case 'Numpad1':
@@ -41,9 +64,9 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: initial
               if (isFlipped) handleRate('easy');
               break;
       }
-  }, [isFlipped, finished, currentIndex]); // Dependencies need to be managed carefully or use refs for current state
+  }, [isFlipped, finished, currentIndex, handlePrev, handleNext]); 
 
-  // Attach event listener with a wrapper to access latest state
+  // Attach event listener
   useEffect(() => {
       const handler = (e: KeyboardEvent) => handleKeyDown(e);
       window.addEventListener('keydown', handler);
@@ -118,12 +141,35 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: initial
       {/* MAIN CARD AREA */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 perspective-1000 relative">
           
+          {/* NAVIGATION BUTTONS */}
+          <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-between px-4 md:px-12 pointer-events-none z-20">
+                <button 
+                    onClick={handlePrev}
+                    disabled={currentIndex === 0}
+                    className={`pointer-events-auto w-12 h-12 rounded-full bg-white shadow-lg border border-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-all ${currentIndex === 0 ? 'opacity-0' : 'opacity-100'}`}
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                </button>
+
+                <button 
+                    onClick={handleNext}
+                    disabled={currentIndex === queue.length - 1}
+                    className={`pointer-events-auto w-12 h-12 rounded-full bg-white shadow-lg border border-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-all ${currentIndex === queue.length - 1 ? 'opacity-0' : 'opacity-100'}`}
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                </button>
+          </div>
+
           <div 
-            className="bg-white w-full max-w-2xl aspect-[4/3] md:aspect-[16/10] rounded-3xl shadow-2xl border border-slate-200 flex flex-col items-center justify-center text-center p-8 md:p-12 relative cursor-pointer hover:shadow-indigo-100 transition-all duration-300"
-            onClick={() => !isFlipped && setIsFlipped(true)}
+            className="bg-white w-full max-w-2xl aspect-[4/3] md:aspect-[16/10] rounded-3xl shadow-2xl border border-slate-200 flex flex-col items-center justify-center text-center p-8 md:p-12 relative cursor-pointer hover:shadow-indigo-100 transition-all duration-300 select-none"
+            onClick={() => setIsFlipped(prev => !prev)}
           >
                 {/* FRONT CONTENT */}
-                <div className={`transition-all duration-500 ${isFlipped ? '-translate-y-8 opacity-40 scale-90 blur-[1px]' : 'opacity-100 scale-100'}`}>
+                <div className={`transition-all duration-500 absolute inset-0 flex flex-col items-center justify-center p-8 ${isFlipped ? 'opacity-0 pointer-events-none scale-90' : 'opacity-100 scale-100'}`}>
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em] mb-6 block">Thuật ngữ</span>
                     <h2 className="text-4xl md:text-6xl font-serif font-medium text-slate-900 leading-tight mb-4 selection:bg-indigo-100">
                         {currentCard.term}
@@ -137,32 +183,28 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ cards: initial
                 </div>
 
                 {/* BACK CONTENT (REVEAL) */}
-                {isFlipped && (
-                    <div className="absolute inset-0 top-1/3 flex flex-col items-center justify-center p-8 pt-12 animate-in fade-in slide-in-from-bottom-4 duration-300 bg-white/95 rounded-b-3xl">
-                        <div className="w-16 h-1 bg-slate-200 rounded-full mb-6"></div>
-                        
-                        {currentCard.phonetic && (
-                            <div className="mb-4 font-mono text-slate-500 text-lg">/{currentCard.phonetic}/</div>
-                        )}
-                        
-                        <div className="text-2xl md:text-3xl font-bold text-slate-800 mb-6 max-w-lg leading-snug">
-                            {currentCard.meaning}
-                        </div>
-
-                        {currentCard.explanation && (
-                            <div className="bg-slate-50 p-4 rounded-xl text-slate-600 text-sm md:text-base max-w-lg border border-slate-100 italic">
-                                "{currentCard.explanation}"
-                            </div>
-                        )}
+                <div className={`transition-all duration-500 absolute inset-0 flex flex-col items-center justify-center p-8 bg-white rounded-3xl ${isFlipped ? 'opacity-100 scale-100 z-10' : 'opacity-0 pointer-events-none scale-90'}`}>
+                    <div className="w-16 h-1 bg-slate-200 rounded-full mb-6 absolute top-8"></div>
+                    
+                    {currentCard.phonetic && (
+                        <div className="mb-4 font-mono text-slate-500 text-lg">/{currentCard.phonetic}/</div>
+                    )}
+                    
+                    <div className="text-2xl md:text-3xl font-bold text-slate-800 mb-6 max-w-lg leading-snug">
+                        {currentCard.meaning}
                     </div>
-                )}
+
+                    {currentCard.explanation && (
+                        <div className="bg-slate-50 p-4 rounded-xl text-slate-600 text-sm md:text-base max-w-lg border border-slate-100 italic">
+                            "{currentCard.explanation}"
+                        </div>
+                    )}
+                </div>
                 
                 {/* HINT */}
-                {!isFlipped && (
-                    <div className="absolute bottom-6 text-slate-300 text-xs font-bold uppercase tracking-widest animate-pulse">
-                        Nhấn phím cách hoặc chạm để lật
-                    </div>
-                )}
+                <div className="absolute bottom-6 text-slate-300 text-xs font-bold uppercase tracking-widest">
+                    {isFlipped ? 'Nhấn Space để xem lại từ' : 'Nhấn Space để lật'}
+                </div>
           </div>
       </div>
 
