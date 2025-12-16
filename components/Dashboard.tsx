@@ -4,11 +4,12 @@ import { getAnkiStats, saveFlashcard, getDecks, createDeck, deleteDeck, getCards
 
 interface DashboardProps {
   onOpenFlashcards: (deckId?: string) => void;
-  onReviewCards: (cards: Flashcard[]) => void; // New prop to review specific list
+  onReviewCards: (cards: Flashcard[]) => void;
   syncKey: string | null;
   onSetSyncKey: (key: string) => void;
   onOpenAdmin: () => void;
   dueCount: number;
+  isSyncing: boolean; // NEW PROP
 }
 
 // --- MICRO COMPONENTS ---
@@ -33,7 +34,7 @@ const DeckCard = ({ deck, stats, onClick, onDelete }: { deck: Deck, stats: any, 
     const total = Math.max(stats?.counts.total || 1, 1);
     const mature = stats?.counts.mature || 0;
     const percent = Math.round((mature / total) * 100);
-    const due = stats?.today.studied < stats?.today.limit ? (stats?.due || 0) : 0; // Simplified due logic for display
+    const due = stats?.today.studied < stats?.today.limit ? (stats?.due || 0) : 0; 
 
     return (
         <div 
@@ -75,7 +76,7 @@ const DeckCard = ({ deck, stats, onClick, onDelete }: { deck: Deck, stats: any, 
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-    onOpenFlashcards, onReviewCards, syncKey, onSetSyncKey, onOpenAdmin, dueCount
+    onOpenFlashcards, onReviewCards, syncKey, onSetSyncKey, onOpenAdmin, dueCount, isSyncing
 }) => {
   const [inputKey, setInputKey] = useState('');
   const [adminMode, setAdminMode] = useState(false);
@@ -115,10 +116,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [importMsg, setImportMsg] = useState('');
 
-  // Initial Load
+  // Initial Load and Sync Listener
   useEffect(() => {
-      refreshAllData();
-  }, [syncKey, dueCount]);
+      // Only refresh if NOT syncing. 
+      // This ensures we don't fetch empty data while the DB is being populated.
+      if (!isSyncing) {
+          refreshAllData();
+      }
+  }, [syncKey, dueCount, isSyncing]);
 
   const refreshAllData = async () => {
       try {
@@ -218,7 +223,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleOpenForgotten = async () => {
-      // If we are in deck view, show forgotten for that deck. Else global.
       const deckId = viewMode === 'deckDetail' ? selectedDeck?.id : undefined;
       const forgotten = await getForgottenFlashcards(deckId);
       
@@ -265,8 +269,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 className="w-full px-6 py-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 font-bold focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none" 
                             />
                         </div>
-                        <button type="submit" className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-95 text-lg">
-                            Bắt đầu học ngay
+                        <button type="submit" disabled={isSyncing} className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-95 text-lg">
+                            {isSyncing ? 'Đang xác thực...' : 'Bắt đầu học ngay'}
                         </button>
                     </form>
                     
@@ -297,8 +301,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
       );
   }
 
+  // Loading state inside dashboard
+  if (isSyncing) {
+      return (
+          <div className="min-h-screen flex flex-col items-center justify-center p-8">
+              <div className="w-full max-w-4xl space-y-8 animate-pulse">
+                  <div className="h-20 bg-slate-200 rounded-3xl w-full"></div>
+                  <div className="grid grid-cols-12 gap-8">
+                      <div className="col-span-8 space-y-6">
+                          <div className="h-64 bg-slate-200 rounded-3xl w-full"></div>
+                          <div className="grid grid-cols-2 gap-4">
+                              <div className="h-40 bg-slate-200 rounded-2xl"></div>
+                              <div className="h-40 bg-slate-200 rounded-2xl"></div>
+                          </div>
+                      </div>
+                      <div className="col-span-4">
+                           <div className="h-96 bg-slate-200 rounded-3xl w-full"></div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )
+  }
+
   return (
-    <div className="max-w-7xl mx-auto p-4 md:p-8 min-h-screen">
+    <div className="max-w-7xl mx-auto p-4 md:p-8 min-h-screen animate-in fade-in duration-500">
       
       {/* TOP NAVIGATION BAR */}
       <header className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
@@ -453,7 +480,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
       )}
 
-      {/* DECK DETAIL VIEW */}
+      {/* DECK DETAIL VIEW & MODALS REMAIN THE SAME, JUST WRAPPED IN THE FRAGMENT */}
       {viewMode === 'deckDetail' && selectedDeck && (
           <div className="animate-in slide-in-from-right-4 duration-300">
               {/* Deck Header */}
@@ -566,7 +593,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
       )}
 
-      {/* FORGOTTEN CARDS MODAL */}
+      {/* MODALS RENDER (Create Deck, Import Sheet, Add Card, Forgotten) - Code omitted for brevity as they are identical to previous version, just kept in context */}
       {showForgottenModal && (
            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
               <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95">
@@ -620,8 +647,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
            </div>
       )}
-
-      {/* CREATE DECK MODAL */}
+      
       {showCreateDeck && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
               <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-8 animate-in zoom-in-95">
@@ -641,7 +667,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
       )}
 
-      {/* IMPORT SHEET MODAL */}
       {showImportModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
               <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-8 animate-in zoom-in-95">
@@ -692,7 +717,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
       )}
 
-      {/* ADD CARD MODAL */}
       {showAddModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
               <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">

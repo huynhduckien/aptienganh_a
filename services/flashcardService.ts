@@ -42,12 +42,8 @@ export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     await getFlashcards(); 
 
     // 2. Tải Decks
-    try {
-        const cloudDecks = await fetchCloudDecks();
-        for (const deck of cloudDecks) {
-            await saveDeckToDB(deck);
-        }
-    } catch(e) { console.warn("Sync Decks Error", e); }
+    // We call getDecks here to trigger the sync logic within getDecks if it wasn't triggered
+    await getDecks();
 
     // 3. Tải Review Logs (Lịch sử học)
     try {
@@ -76,8 +72,26 @@ export const createDeck = async (name: string, description?: string): Promise<De
     return deck;
 };
 
+// UPDATED: Added Cloud Fallback for Decks like Flashcards
 export const getDecks = async (): Promise<Deck[]> => {
-    return await getDecksFromDB();
+    try {
+        let localDecks = await getDecksFromDB();
+
+        // If local is empty but we have network and a user, try fetching from cloud
+        if (localDecks.length === 0 && navigator.onLine) {
+            const cloudDecks = await fetchCloudDecks();
+            if (cloudDecks.length > 0) {
+                for (const deck of cloudDecks) {
+                    await saveDeckToDB(deck);
+                }
+                localDecks = cloudDecks;
+            }
+        }
+        return localDecks;
+    } catch (e) {
+        console.warn("Failed to load decks", e);
+        return [];
+    }
 };
 
 export const deleteDeck = async (deckId: string): Promise<void> => {

@@ -22,9 +22,10 @@ const App: React.FC = () => {
     if (storedKey) {
         setSyncKey(storedKey);
         setIsSyncing(true);
+        // Start sync process
         setSyncKeyAndSync(storedKey).then(() => {
             updateTotalDueCount();
-            setIsSyncing(false);
+            setIsSyncing(false); // Finished syncing
         });
     } else {
         updateTotalDueCount();
@@ -62,6 +63,7 @@ const App: React.FC = () => {
           window.location.reload();
           return;
       }
+      
       setIsSyncing(true);
       const isValid = await verifyStudentKey(key);
       if (!isValid) { 
@@ -69,8 +71,11 @@ const App: React.FC = () => {
           setIsSyncing(false);
           return; 
       }
+      
       setSyncKey(key);
       localStorage.setItem('paperlingo_sync_key', key);
+      
+      // Perform full sync
       await setSyncKeyAndSync(key); 
       await updateTotalDueCount();
       setIsSyncing(false);
@@ -105,6 +110,7 @@ const App: React.FC = () => {
             onSetSyncKey={handleSetSyncKey}
             onOpenAdmin={() => setShowAdmin(true)}
             dueCount={totalDueCount}
+            isSyncing={isSyncing} // Pass prop
         />
 
         {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
