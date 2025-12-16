@@ -169,12 +169,16 @@ export const getFlashcards = async (): Promise<Flashcard[]> => {
 export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'nextReview' | 'createdAt' | 'easeFactor' | 'interval' | 'repetitions'>): Promise<boolean> => {
   const cards = await getFlashcards();
   
-  if (cards.some(c => c.term.toLowerCase() === card.term.toLowerCase() && c.deckId === card.deckId)) {
+  // Strict Duplicate Check: Trim and Lowercase
+  const normalizedTerm = card.term.trim().toLowerCase();
+  
+  if (cards.some(c => c.term.trim().toLowerCase() === normalizedTerm && c.deckId === card.deckId)) {
     return false; // Prevent duplicates in SAME deck
   }
 
   const newCard: Flashcard = {
     ...card,
+    term: card.term.trim(), // Ensure saved term is trimmed
     id: generateId(),
     level: 0, // 0 = New
     nextReview: Date.now(),
@@ -271,23 +275,42 @@ export const importFlashcardsFromSheet = async (sheetUrl: string, deckId?: strin
              return { added: 0, total: 0, error: "Không tìm thấy cột 'Từ' hoặc 'Nghĩa của từ'. Vui lòng kiểm tra lại tiêu đề cột." };
         }
 
+        // --- NEW: DUPLICATE DETECTION OPTIMIZATION ---
+        // Fetch existing cards ONCE to avoid multiple DB calls
+        const allCards = await getFlashcards();
+        const existingTerms = new Set(
+            allCards
+                .filter(c => c.deckId === deckId) // Only check in the target deck
+                .map(c => c.term.trim().toLowerCase()) // Normalize terms
+        );
+
         let addedCount = 0;
-        let processedCount = 0;
+        let processedCount = 0; // Counts valid rows found in CSV
 
         // 4. Process Rows
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
             if (row.length <= idxTerm) continue;
 
-            const term = row[idxTerm];
+            const rawTerm = row[idxTerm];
             const meaning = row[idxMeaning] || "";
             const phonetic = idxPhonetic !== -1 ? row[idxPhonetic] : "";
             const type = idxType !== -1 ? row[idxType] : "";
             
             const explanation = type ? `(${type})` : "";
+            const term = rawTerm ? rawTerm.trim() : "";
 
+            // Check if valid row
             if (term && meaning) {
                 processedCount++;
+
+                // CHECK DUPLICATE STRICTLY
+                const normalizedTerm = term.toLowerCase();
+                if (existingTerms.has(normalizedTerm)) {
+                    // Skip if already in DB or already added in this batch
+                    continue; 
+                }
+
                 const success = await saveFlashcard({
                     term,
                     meaning,
@@ -295,7 +318,11 @@ export const importFlashcardsFromSheet = async (sheetUrl: string, deckId?: strin
                     explanation,
                     deckId // Pass deckId
                 });
-                if (success) addedCount++;
+                
+                if (success) {
+                    addedCount++;
+                    existingTerms.add(normalizedTerm); // Add to Set to prevent duplicates within the sheet itself
+                }
             }
         }
 
