@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { AdminPanel } from './components/AdminPanel'; 
@@ -13,6 +14,7 @@ const App: React.FC = () => {
   const [dueCards, setDueCards] = useState<Flashcard[]>([]);
   const [showReview, setShowReview] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   
   // Lesson States
@@ -79,6 +81,16 @@ const App: React.FC = () => {
       await setSyncKeyAndSync(key); 
       await updateTotalDueCount();
       setIsSyncing(false);
+  };
+
+  const handleOpenAdmin = () => {
+      const password = prompt("Nhập mật khẩu Admin để tiếp tục:");
+      if (password === "admin123") { // Mật khẩu mặc định, có thể thay đổi sau
+          setIsAdminAuthenticated(true);
+          setShowAdmin(true);
+      } else if (password !== null) {
+          alert("Mật khẩu không chính xác!");
+      }
   };
 
   // Manual Translation Handler (No AI Processing)
@@ -158,13 +170,13 @@ const App: React.FC = () => {
             onReviewCards={handleReviewSpecificCards}
             syncKey={syncKey}
             onSetSyncKey={handleSetSyncKey}
-            onOpenAdmin={() => setShowAdmin(true)}
+            onOpenAdmin={handleOpenAdmin}
             dueCount={totalDueCount}
             isSyncing={isSyncing}
             onManualText={handleManualTranslation}
         />
 
-        {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
+        {showAdmin && isAdminAuthenticated && <AdminPanel onClose={() => { setShowAdmin(false); setIsAdminAuthenticated(false); }} />}
     </div>
   );
 };
