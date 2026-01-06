@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { AnkiStats, Deck, Flashcard } from '../types';
-import { getAnkiStats, createDeck, deleteDeck, getDueFlashcards, getDailyLimit, getDecks, importFlashcardsFromSheet } from '../services/flashcardService';
+import { getAnkiStats, createDeck, deleteDeck, getDueFlashcards, getDailyLimit, setDailyLimit, getDecks, importFlashcardsFromSheet } from '../services/flashcardService';
 
 interface DashboardProps {
   onOpenFlashcards: (deckId?: string) => void;
@@ -48,7 +48,7 @@ const DeckCard = ({ deck, stats, onClick, onDelete, onImport }: { deck: Deck, st
                     <button onClick={onImport} title="Import từ Google Sheet" className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-indigo-600 transition-all">
                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     </button>
-                    <button onClick={onDelete} className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-red-500 transition-all">
+                    <button onClick={onDelete} title="Xóa bộ thẻ" className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-red-500 transition-all">
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                     </button>
                 </div>
@@ -83,7 +83,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [manualText, setManualText] = useState('');
   const [manualLang, setManualLang] = useState<'en' | 'zh'>('en');
   const [showCreateDeck, setShowCreateDeck] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [newDeckName, setNewDeckName] = useState('');
+  const [tempDailyLimit, setTempDailyLimit] = useState(getDailyLimit());
   const [isImporting, setIsImporting] = useState(false);
 
   useEffect(() => {
@@ -104,6 +106,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
           }
           setDeckStatsMap(dStats);
       } catch (e) { console.error(e); }
+  };
+
+  const handleUpdateLimit = () => {
+      setDailyLimit(tempDailyLimit);
+      setShowSettings(false);
+      refreshAllData();
   };
 
   const handleImportSheet = async (e: any, deckId: string) => {
@@ -202,7 +210,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
           </div>
           <div className="flex items-center gap-4 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm">
-              <button onClick={onOpenAdmin} className="text-slate-400 hover:text-indigo-600 font-black text-[10px] px-4 uppercase tracking-widest">Admin</button>
+              <button onClick={() => setShowSettings(true)} className="p-3 text-slate-400 hover:text-indigo-600 transition-colors" title="Cài đặt mục tiêu">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+              <div className="w-[1px] h-6 bg-slate-100"></div>
               <button onClick={() => { if(confirm('Đăng xuất?')) onSetSyncKey(''); }} className="px-6 py-3 rounded-xl bg-red-50 text-red-600 font-black hover:bg-red-100 transition-all text-[10px] uppercase tracking-widest">Đăng xuất</button>
           </div>
       </header>
@@ -228,7 +239,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           value={manualText}
                           onChange={(e) => setManualText(e.target.value)}
                           placeholder="Dán nội dung bài báo hoặc đoạn văn cần luyện dịch tại đây..."
-                          className="w-full h-80 p-8 rounded-[32px] border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 outline-none text-xl leading-relaxed resize-none mb-6 placeholder:text-slate-300 transition-all"
+                          className="w-full h-80 p-8 rounded-[32px] border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 outline-none text-xl leading-relaxed resize-none mb-6 placeholder:text-slate-300 transition-all font-medium"
                       />
                       <button 
                           onClick={handleStartLesson}
@@ -281,7 +292,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </div>
                   )}
                   <div className="mt-12 pt-8 border-t border-slate-100">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Mục tiêu ngày</p>
+                      <div className="flex justify-between items-center mb-4">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Mục tiêu ngày</p>
+                        <button onClick={() => setShowSettings(true)} className="text-[10px] font-black text-indigo-600 hover:underline">Chỉnh sửa</button>
+                      </div>
+                      <div className="flex justify-between items-end mb-3">
+                         <span className="text-2xl font-black text-slate-900">{globalStats?.today.studied || 0}</span>
+                         <span className="text-xs font-bold text-slate-400">/ {getDailyLimit()} thẻ</span>
+                      </div>
                       <div className="w-full bg-slate-50 h-3 rounded-full overflow-hidden border border-slate-100">
                           <div 
                             className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all duration-1000" 
@@ -293,6 +311,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
       </div>
 
+      {/* CREATE DECK MODAL */}
       {showCreateDeck && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-6 animate-in fade-in duration-300">
               <div className="bg-white w-full max-w-sm rounded-[40px] p-10 shadow-2xl border border-white text-center">
@@ -301,6 +320,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div className="flex gap-4">
                       <button onClick={() => setShowCreateDeck(false)} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Hủy</button>
                       <button onClick={handleCreateDeck} className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl active:scale-95 transition-all text-[10px] uppercase">Tạo ngay</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* SETTINGS MODAL (DAILY LIMIT) */}
+      {showSettings && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-6 animate-in fade-in duration-300">
+              <div className="bg-white w-full max-w-sm rounded-[40px] p-10 shadow-2xl border border-white text-center">
+                  <h3 className="font-black text-2xl mb-2 text-slate-900">Cài đặt mục tiêu</h3>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-8">Số lượng thẻ học mỗi ngày</p>
+                  
+                  <div className="flex items-center justify-center gap-6 mb-10">
+                      <button onClick={() => setTempDailyLimit(prev => Math.max(5, prev - 5))} className="w-12 h-12 rounded-full border-2 border-slate-100 flex items-center justify-center text-2xl font-black text-slate-400 hover:border-indigo-500 hover:text-indigo-600 transition-all">-</button>
+                      <span className="text-5xl font-black text-slate-900 w-24">{tempDailyLimit}</span>
+                      <button onClick={() => setTempDailyLimit(prev => Math.min(500, prev + 5))} className="w-12 h-12 rounded-full border-2 border-slate-100 flex items-center justify-center text-2xl font-black text-slate-400 hover:border-indigo-500 hover:text-indigo-600 transition-all">+</button>
+                  </div>
+
+                  <div className="flex gap-4">
+                      <button onClick={() => { setShowSettings(false); setTempDailyLimit(getDailyLimit()); }} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Hủy</button>
+                      <button onClick={handleUpdateLimit} className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl active:scale-95 transition-all text-[10px] uppercase">Lưu thay đổi</button>
                   </div>
               </div>
           </div>
