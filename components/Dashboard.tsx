@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { AnkiStats, Deck, Flashcard } from '../types';
 import { getAnkiStats, saveFlashcard, getDecks, createDeck, deleteDeck, getCardsByDeck, getDueFlashcards, setDailyLimit, getDailyLimit, importFlashcardsFromSheet, getForgottenFlashcards } from '../services/flashcardService';
@@ -77,7 +78,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [globalStats, setGlobalStats] = useState<AnkiStats | null>(null);
   const [decks, setDecks] = useState<Deck[]>([]);
   const [deckStatsMap, setDeckStatsMap] = useState<Record<string, any>>({});
-  const [viewMode, setViewMode] = useState<'overview' | 'deckDetail'>('overview');
   
   // Lesson Input State
   const [manualText, setManualText] = useState('');
@@ -137,16 +137,44 @@ export const Dashboard: React.FC<DashboardProps> = ({
   if (!syncKey) {
       return (
         <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50">
-            <div className="bg-white rounded-[32px] p-8 md:p-12 shadow-2xl w-full max-w-4xl flex flex-col md:flex-row overflow-hidden relative">
+            <div className="bg-white rounded-[32px] p-8 md:p-12 shadow-2xl w-full max-w-4xl flex flex-col md:flex-row overflow-hidden relative border border-slate-100">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 to-indigo-600"></div>
                 <div className="flex-1 pr-0 md:pr-12 mb-8 md:mb-0 z-10">
                     <div className="inline-block p-3 rounded-2xl bg-indigo-50 text-indigo-600 mb-6 text-3xl">🧠</div>
-                    <h1 className="text-4xl font-black text-slate-900 mb-4 tracking-tight">Flashcard Master</h1>
+                    <h1 className="text-4xl font-black text-slate-900 mb-4 tracking-tight">PaperLingo</h1>
                     <p className="text-slate-500 text-lg mb-8 leading-relaxed">Hệ thống luyện dịch và học từ vựng SRS thông minh.</p>
+                    
                     <form onSubmit={handleSyncLogin} className="space-y-4">
-                        <input type="text" value={inputKey} onChange={(e) => setInputKey(e.target.value)} placeholder="Mã học viên..." className="w-full px-6 py-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 font-bold focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none" />
-                        <button type="submit" disabled={isSyncing} className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-95 text-lg">Bắt đầu ngay</button>
+                        <div className="relative">
+                            <input 
+                                type="text" 
+                                value={inputKey} 
+                                onChange={(e) => setInputKey(e.target.value)} 
+                                placeholder="Mã học viên của bạn..." 
+                                className="w-full px-6 py-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 font-bold focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none" 
+                            />
+                        </div>
+                        <button type="submit" disabled={isSyncing} className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-95 text-lg hover:bg-indigo-700">
+                            {isSyncing ? 'Đang vào...' : 'Bắt đầu ngay'}
+                        </button>
                     </form>
+
+                    <div className="mt-8 pt-8 border-t border-slate-100 flex flex-col items-center">
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-3">Dành cho Giáo viên</p>
+                        <button 
+                            onClick={onOpenAdmin}
+                            className="flex items-center gap-2 px-6 py-2 rounded-full border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 hover:border-indigo-300 hover:text-indigo-600 transition-all group"
+                        >
+                            <span className="text-lg group-hover:rotate-12 transition-transform">🛡️</span>
+                            Quản trị viên
+                        </button>
+                    </div>
+                </div>
+                
+                <div className="hidden md:flex flex-1 bg-slate-50 rounded-2xl p-8 flex-col justify-center items-center text-center">
+                    <div className="text-6xl mb-6">🚀</div>
+                    <h3 className="font-bold text-slate-800 text-xl mb-2">Học tập không giới hạn</h3>
+                    <p className="text-slate-400 text-sm">Dữ liệu của bạn được đồng bộ hóa tức thì trên mọi thiết bị thông qua Mã học viên.</p>
                 </div>
             </div>
         </div>
