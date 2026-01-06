@@ -241,10 +241,12 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
             {/* LEFT: SOURCE TEXT */}
             <div className={`p-8 md:p-12 overflow-y-auto custom-scrollbar ${isManualMode ? 'lg:sticky lg:top-0 lg:max-h-screen' : ''}`}>
                 <div className="relative group" ref={textCardRef}>
-                    <div className={`px-8 py-10 rounded-[32px] relative overflow-hidden transition-all duration-300 ${getThemeClasses()}`} onMouseUp={handleTextMouseUp} translate="no">
-                        <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-indigo-500/40"></div>
-                        <div className={`absolute top-4 right-6 text-[10px] font-black uppercase tracking-widest ${settings.theme === 'dark' ? 'text-slate-600' : 'text-slate-300'}`}>Văn bản gốc</div>
-                        <p className={`${settings.fontFamily} ${settings.fontSize} leading-relaxed ${language === 'zh' ? 'tracking-widest' : 'tracking-normal'}`}>
+                    <div className={`px-10 py-12 rounded-[32px] relative overflow-hidden transition-all duration-300 ${getThemeClasses()} border-2`} onMouseUp={handleTextMouseUp} translate="no">
+                        <div className="absolute left-0 top-0 bottom-0 w-2 bg-indigo-500/40"></div>
+                        <div className={`absolute top-4 right-8 text-[10px] font-black uppercase tracking-widest ${settings.theme === 'dark' ? 'text-slate-600' : 'text-slate-300'}`}>SOURCE TEXT</div>
+                        
+                        {/* THE BEAUTIFIED TEXT BLOCK */}
+                        <p className={`${settings.fontFamily} ${settings.fontSize} leading-[1.85] text-justify hyphens-auto break-words ${language === 'zh' ? 'tracking-widest' : 'tracking-normal'}`}>
                           {lessonData.cleanedSourceText}
                         </p>
                     </div>
