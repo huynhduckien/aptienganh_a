@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ProcessedChunk, LessonContent } from '../types';
+import { ProcessedChunk, LessonContent, DictionaryResponse } from '../types';
 import { explainPhrase } from '../services/geminiService';
 
 interface LessonViewProps {
@@ -20,8 +20,9 @@ interface SelectionState {
     left: number; 
     show: boolean; 
     loading: boolean; 
-    result?: string;
+    result?: DictionaryResponse; // Lưu trữ toàn bộ kết quả tra cứu
     placement: 'top' | 'bottom';
+    isSaved: boolean; // Trạng thái đã nhấn lưu hay chưa
 }
 
 type ThemeMode = 'light' | 'sepia' | 'dark';
@@ -37,7 +38,7 @@ interface ReadingSettings {
 export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalChunks, onComplete, onNext, onLookup, onContentUpdate, isLast }) => {
   const [userTranslation, setUserTranslation] = useState('');
   const [selection, setSelection] = useState<SelectionState>({ 
-      text: '', top: 0, left: 0, show: false, loading: false, placement: 'top' 
+      text: '', top: 0, left: 0, show: false, loading: false, placement: 'top', isSaved: false
   });
   const textCardRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -61,7 +62,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
 
   useEffect(() => {
     setUserTranslation('');
-    setSelection({ text: '', top: 0, left: 0, show: false, loading: false, placement: 'top' });
+    setSelection({ text: '', top: 0, left: 0, show: false, loading: false, placement: 'top', isSaved: false });
     setShowSettings(false);
   }, [chunk.id]);
 
@@ -72,6 +73,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
           return;
       }
       const text = winSelection.toString().trim();
+      // Giới hạn độ dài để tránh tra cứu cả đoạn văn dài
       if (text.length > 0 && text.split(/\s+/).length <= 15) {
           const range = winSelection.getRangeAt(0);
           const rect = range.getBoundingClientRect();
@@ -79,7 +81,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
           if (containerRect) {
             const placement = rect.top < 160 ? 'bottom' : 'top';
             let top = placement === 'top' ? rect.top - containerRect.top - 12 : rect.bottom - containerRect.top + 12;
-            setSelection({ text, top, left: rect.left - containerRect.left + (rect.width / 2), show: true, loading: true, placement });
+            setSelection({ text, top, left: rect.left - containerRect.left + (rect.width / 2), show: true, loading: true, placement, isSaved: false });
             performLookup(text);
           }
       }
@@ -88,11 +90,24 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
   const performLookup = async (text: string) => {
       try {
           const result = await explainPhrase(text, chunk.text);
-          onLookup(text, result.shortMeaning, result.detailedExplanation, result.phonetic);
-          setSelection(prev => (prev.text === text && prev.show) ? { ...prev, loading: false, result: result.shortMeaning } : prev);
+          // Không gọi onLookup tự động nữa, chỉ lưu kết quả vào state để hiển thị
+          setSelection(prev => (prev.text === text && prev.show) ? { ...prev, loading: false, result } : prev);
       } catch (e) {
           setSelection(prev => ({ ...prev, loading: false, show: false }));
       }
+  };
+
+  const handleSaveCard = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!selection.result || selection.isSaved) return;
+      
+      onLookup(
+          selection.text, 
+          selection.result.shortMeaning, 
+          selection.result.detailedExplanation, 
+          selection.result.phonetic
+      );
+      setSelection(prev => ({ ...prev, isSaved: true }));
   };
 
   const handleFinishChunk = () => {
@@ -109,7 +124,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
       }
   };
   
-  const getSelectionColor = () => settings.theme === 'dark' ? 'bg-indigo-500' : 'bg-slate-900'; 
+  const getSelectionColor = () => settings.theme === 'dark' ? 'bg-indigo-600' : 'bg-slate-900'; 
 
   return (
     <div className="max-w-7xl mx-auto w-full px-4 md:px-6 mb-12">
@@ -122,8 +137,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                   ✍️
                 </div>
                 <div>
-                  <h2 className="text-sm font-black text-slate-900 uppercase tracking-[0.15em]">Luyện dịch thủ công</h2>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">Bôi đen văn bản để tra từ vựng tức thì</p>
+                  <h2 className="text-sm font-black text-slate-900 uppercase tracking-[0.15em]">Luyện dịch chuyên sâu</h2>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">Bôi đen từ để tra cứu & Lưu thẻ vựng</p>
                 </div>
             </div>
             <div className="flex items-center gap-4">
@@ -178,10 +193,39 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                         <div className={`absolute z-50 transform -translate-x-1/2 ${selection.placement === 'top' ? '-translate-y-full' : ''}`} style={{ top: selection.top, left: selection.left }}>
                              <div className="relative flex flex-col items-center">
                                 {selection.placement === 'bottom' && <div className={`w-3 h-3 rotate-45 transform translate-y-1.5 ${getSelectionColor()}`}></div>}
-                                <div className={`${getSelectionColor()} text-white rounded-[20px] shadow-2xl w-max max-w-[340px] px-6 py-5 text-center ring-8 ring-white/5 border border-white/10`}>
+                                <div className={`${getSelectionColor()} text-white rounded-[24px] shadow-2xl w-max min-w-[200px] max-w-[340px] px-6 py-5 text-left ring-8 ring-white/5 border border-white/10`}>
                                     {selection.loading ? 
-                                      <div className="flex items-center gap-3 text-xs font-black animate-pulse"><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"></div> ĐANG TRA TỪ...</div> 
-                                      : <div className="text-sm font-bold whitespace-normal leading-relaxed">{selection.result}</div>
+                                      <div className="flex items-center justify-center gap-3 text-xs font-black animate-pulse py-2">
+                                        <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"></div> 
+                                        ĐANG TRA TỪ...
+                                      </div> 
+                                      : (
+                                        <div className="space-y-3">
+                                            <div className="flex justify-between items-start gap-4">
+                                                <div>
+                                                    <div className="text-xs font-black opacity-50 uppercase tracking-widest mb-1">{selection.text}</div>
+                                                    {selection.result?.phonetic && <div className="text-[10px] font-mono opacity-80">/{selection.result.phonetic}/</div>}
+                                                </div>
+                                                <button 
+                                                    onClick={handleSaveCard}
+                                                    disabled={selection.isSaved}
+                                                    className={`p-2 rounded-xl transition-all flex items-center gap-2 ${selection.isSaved ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+                                                    title={selection.isSaved ? "Đã lưu" : "Lưu vào bộ thẻ"}
+                                                >
+                                                    {selection.isSaved ? (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                                    ) : (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                                    )}
+                                                    <span className="text-[10px] font-black uppercase tracking-widest">{selection.isSaved ? "ĐÃ LƯU" : "LƯU THẺ"}</span>
+                                                </button>
+                                            </div>
+                                            <div className="h-[1px] bg-white/10 w-full"></div>
+                                            <div className="text-sm font-bold whitespace-normal leading-relaxed">
+                                                {selection.result?.shortMeaning || "Không tìm thấy nghĩa."}
+                                            </div>
+                                        </div>
+                                      )
                                     }
                                 </div>
                                 {selection.placement === 'top' && <div className={`w-3 h-3 rotate-45 transform -translate-y-1.5 ${getSelectionColor()}`}></div>}
