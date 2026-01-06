@@ -159,7 +159,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="absolute top-0 left-0 w-full h-3 bg-gradient-to-r from-indigo-500 to-purple-600"></div>
                 <div className="flex-1 pr-0 md:pr-16 mb-12 md:mb-0 z-10">
                     <div className="inline-block p-4 rounded-[20px] bg-indigo-50 text-indigo-600 mb-8 text-4xl shadow-inner">🧠</div>
-                    <h1 className="text-5xl font-black text-slate-900 mb-6 tracking-tight">PaperLingo</h1>
+                    <h1 className="text-5xl font-black text-slate-900 mb-6 tracking-tight">KenLingo</h1>
                     <p className="text-slate-500 text-xl mb-12 leading-relaxed font-medium">Luyện dịch chuyên sâu & Ghi nhớ từ vựng SRS thủ công.</p>
                     <form onSubmit={(e) => { e.preventDefault(); if(inputKey) onSetSyncKey(inputKey); }} className="space-y-6">
                         <input type="text" value={inputKey} onChange={(e) => setInputKey(e.target.value)} placeholder="Mã học viên..." className="w-full px-8 py-5 rounded-2xl bg-slate-50 border-2 border-slate-100 text-slate-900 font-black focus:border-indigo-500 focus:bg-white transition-all outline-none text-xl" />
@@ -345,7 +345,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="flex items-center gap-5">
               <div className="w-16 h-16 bg-slate-900 text-white rounded-[24px] flex items-center justify-center font-black text-2xl shadow-2xl shadow-slate-200">{syncKey.charAt(0).toUpperCase()}</div>
               <div>
-                  <h1 className="text-3xl font-black text-slate-900 tracking-tight">PaperLingo</h1>
+                  <h1 className="text-3xl font-black text-slate-900 tracking-tight">KenLingo</h1>
                   <p className="text-xs text-slate-400 font-black uppercase tracking-[0.2em] mt-1">Dịch thuật & Ghi nhớ SRS</p>
               </div>
           </div>
