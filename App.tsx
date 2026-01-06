@@ -5,7 +5,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { FlashcardReview } from './components/FlashcardReview';
 import { LessonView } from './components/LessonView';
 import { Flashcard, ProcessedChunk, LessonContent } from './types';
-import { getDueFlashcards, setSyncKeyAndSync, saveFlashcard } from './services/flashcardService';
+import { getDueFlashcards, setSyncKeyAndSync, saveFlashcard, getForgottenFlashcards } from './services/flashcardService';
 import { verifyStudentKey } from './services/firebaseService';
 import { clearAllFlashcardsFromDB } from './services/db';
 
@@ -56,6 +56,16 @@ const App: React.FC = () => {
       setShowReview(true);
   };
 
+  const handleStartForgottenReview = async () => {
+      const cards = await getForgottenFlashcards();
+      if (cards.length === 0) {
+          alert("Tuyệt vời! Bạn không có từ vựng nào bị quên.");
+          return;
+      }
+      setDueCards(cards);
+      setShowReview(true);
+  };
+
   const handleReviewSpecificCards = (cards: Flashcard[]) => {
       if (cards.length === 0) return;
       setDueCards(cards);
@@ -94,7 +104,6 @@ const App: React.FC = () => {
       }
   };
 
-  // Thuật toán chia nhỏ văn bản thông minh locally
   const smartSplit = (content: string, targetLength: number = 1500): string[] => {
       const paragraphs = content.split(/\n\s*\n/);
       const chunks: string[] = [];
@@ -103,8 +112,8 @@ const App: React.FC = () => {
       for (let p of paragraphs) {
           p = p.trim();
           if (!p) continue;
-          if (buffer.length + p.length > targetLength) {
-              if (buffer) chunks.push(buffer);
+          if (buffer.length + p.length > targetLength && buffer.length > 0) {
+              chunks.push(buffer);
               buffer = p;
           } else {
               buffer += (buffer ? "\n\n" : "") + p;
@@ -115,6 +124,7 @@ const App: React.FC = () => {
   };
 
   const handleLocalTextProcessing = async (text: string, lang: 'en' | 'zh') => {
+      if (!text.trim()) return;
       setIsProcessingLocal(true);
       setLessonLanguage(lang);
       try {
@@ -158,8 +168,8 @@ const App: React.FC = () => {
       return (
           <div className="min-h-screen bg-slate-50 p-4 md:p-8 animate-in fade-in duration-500">
               <div className="max-w-7xl mx-auto mb-6 flex justify-between items-center px-4 md:px-6">
-                  <button onClick={() => setShowLesson(false)} className="px-4 py-2 bg-white rounded-xl shadow-sm border border-slate-200 text-slate-500 font-bold hover:text-slate-800 transition-all flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                  <button onClick={() => setShowLesson(false)} className="px-4 py-2 bg-white rounded-xl shadow-sm border border-slate-200 text-slate-500 font-bold hover:text-slate-800 transition-all flex items-center gap-2 group">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="group-hover:-translate-x-1 transition-transform"><path d="m15 18-6-6 6-6"/></svg>
                     Trở về Dashboard
                   </button>
                   <div className="flex items-center gap-3">
@@ -189,13 +199,14 @@ const App: React.FC = () => {
             <div className="fixed inset-0 z-[60] bg-white/80 backdrop-blur-sm flex items-center justify-center">
                 <div className="flex flex-col items-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-200 border-t-indigo-600 mb-4"></div>
-                    <div className="font-bold text-slate-600">Đang chuẩn bị nội dung...</div>
+                    <div className="font-bold text-slate-600 uppercase text-xs tracking-widest">Đang chuẩn bị nội dung...</div>
                 </div>
             </div>
         )}
 
         <Dashboard 
             onOpenFlashcards={handleStartReview}
+            onReviewForgotten={handleStartForgottenReview}
             onReviewCards={handleReviewSpecificCards}
             syncKey={syncKey}
             onSetSyncKey={handleSetSyncKey}
@@ -209,4 +220,5 @@ const App: React.FC = () => {
     </div>
   );
 };
+
 export default App;
