@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ProcessedChunk, LessonContent, DictionaryResponse, Deck, GradingResult } from '../types';
 import { explainPhrase, gradeTranslation } from '../services/geminiService';
+import { saveTranslation } from '../services/flashcardService';
 
 interface LessonViewProps {
   chunk: ProcessedChunk;
@@ -10,6 +11,7 @@ interface LessonViewProps {
   decks: Deck[];
   onComplete: (chunkId: number) => void;
   onNext: () => void;
+  onClose: () => void; // Thêm prop onClose để thoát bài học
   onLookup: (term: string, meaning: string, explanation: string, phonetic: string, deckId?: string) => Promise<boolean>;
   onContentUpdate: (chunkId: number, content: LessonContent) => void; 
   isLast: boolean;
@@ -37,7 +39,7 @@ interface ReadingSettings {
     fontSize: FontSize;
 }
 
-export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalChunks, decks, onComplete, onNext, onLookup, onContentUpdate, isLast }) => {
+export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalChunks, decks, onComplete, onNext, onClose, onLookup, onContentUpdate, isLast }) => {
   const [userTranslation, setUserTranslation] = useState('');
   const [selection, setSelection] = useState<SelectionState>({ 
       text: '', top: 0, left: 0, show: false, loading: false, placement: 'top', isSaved: false, selectedDeckId: decks[0]?.id
@@ -54,6 +56,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
   // Grading states
   const [isGrading, setIsGrading] = useState(false);
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(null);
+  const [selectedTranslationDeckId, setSelectedTranslationDeckId] = useState(decks[0]?.id || '');
+  const [isTranslationSaved, setIsTranslationSaved] = useState(false);
 
   useEffect(() => {
       const saved = localStorage.getItem('paperlingo_reading_settings');
@@ -72,6 +76,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
     setShowSettings(false);
     setGradingResult(null);
     setIsGrading(false);
+    setIsTranslationSaved(false);
+    if (decks.length > 0) setSelectedTranslationDeckId(decks[0].id);
   }, [chunk.id, decks]);
 
   const handleTextMouseUp = () => {
@@ -142,10 +148,25 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
       }
   };
 
-  const handleContinue = () => {
+  const handleSaveTranslationRecord = async () => {
+      if (!gradingResult || !selectedTranslationDeckId) return;
+      try {
+          await saveTranslation(
+              selectedTranslationDeckId,
+              chunk.text,
+              userTranslation,
+              gradingResult.score,
+              gradingResult.feedback
+          );
+          setIsTranslationSaved(true);
+      } catch (e) {
+          alert("Lỗi khi lưu bản dịch.");
+      }
+  };
+
+  const handleExitLesson = () => {
       onComplete(chunk.id);
-      if (!isLast) onNext();
-      else window.scrollTo({ top: 0, behavior: 'smooth' });
+      onClose();
   };
 
   const getThemeClasses = () => {
@@ -294,12 +315,10 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
             </div>
         </div>
 
-        {/* GRADING REPORT MODAL */}
         {gradingResult && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/90 backdrop-blur-xl p-4 md:p-8 animate-in fade-in duration-300">
                 <div className="bg-white w-full max-w-5xl rounded-[48px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in duration-300">
                     
-                    {/* Header Report */}
                     <div className="bg-slate-900 p-10 flex flex-col md:flex-row justify-between items-center gap-8 border-b border-white/10">
                         <div className="flex items-center gap-6">
                             <div className="w-24 h-24 rounded-full bg-indigo-600 flex items-center justify-center text-4xl font-black text-white shadow-2xl shadow-indigo-500/50">
@@ -310,24 +329,46 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                                 <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mt-1">Đánh giá bởi Gemini AI</p>
                             </div>
                         </div>
-                        <button 
-                          onClick={handleContinue}
-                          className="px-10 py-5 bg-white text-slate-900 font-black rounded-2xl hover:bg-slate-100 transition-all flex items-center gap-3 shadow-xl active:scale-95"
-                        >
-                          TIẾP TỤC ĐOẠN SAU
-                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-                        </button>
+                        <div className="flex items-center gap-4">
+                            <button 
+                              onClick={handleExitLesson}
+                              className="px-10 py-5 bg-red-600 text-white font-black rounded-2xl hover:bg-red-700 transition-all flex items-center gap-3 shadow-xl active:scale-95"
+                            >
+                              THOÁT BÀI HỌC
+                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
+                        </div>
                     </div>
 
                     <div className="p-10 overflow-y-auto custom-scrollbar flex-1 space-y-12">
-                        
-                        {/* Summary */}
+                        <div className="bg-indigo-50/50 p-8 rounded-[32px] border border-indigo-100 flex flex-col md:flex-row items-center justify-between gap-6">
+                            <div className="flex-1">
+                                <h4 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] mb-2">Lưu trữ bản dịch</h4>
+                                <p className="text-slate-600 text-sm font-medium italic">Bạn có muốn lưu cặp câu này vào thư mục học tập?</p>
+                            </div>
+                            <div className="flex items-center gap-4 w-full md:w-auto">
+                                <select 
+                                    value={selectedTranslationDeckId}
+                                    onChange={(e) => setSelectedTranslationDeckId(e.target.value)}
+                                    className="bg-white border-2 border-slate-200 px-4 py-3 rounded-xl text-xs font-bold focus:border-indigo-500 outline-none min-w-[180px]"
+                                >
+                                    {decks.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                </select>
+                                <button 
+                                    onClick={handleSaveTranslationRecord}
+                                    disabled={isTranslationSaved}
+                                    className={`px-8 py-3 font-black rounded-xl text-xs uppercase tracking-widest transition-all ${isTranslationSaved ? 'bg-emerald-100 text-emerald-600 cursor-default' : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 shadow-lg shadow-indigo-100'}`}
+                                >
+                                    {isTranslationSaved ? 'Đã lưu ✓' : 'Lưu bản dịch'}
+                                </button>
+                            </div>
+                        </div>
+
                         <div className="bg-slate-50 p-8 rounded-[32px] border border-slate-100">
                             <h4 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em] mb-4">Nhận xét tổng quan</h4>
                             <p className="text-xl font-medium text-slate-800 leading-relaxed italic">"{gradingResult.feedback}"</p>
                         </div>
 
-                        {/* Comparison */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <div className="space-y-4">
                                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] px-4">Bản dịch của bạn</h4>
@@ -343,7 +384,6 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                             </div>
                         </div>
 
-                        {/* Strengths & Improvements */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <div className="bg-white border-2 border-slate-100 rounded-[32px] p-8">
                                 <h4 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.3em] mb-6 flex items-center gap-2">

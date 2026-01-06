@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { AnkiStats, Deck, Flashcard } from '../types';
-import { getAnkiStats, createDeck, deleteDeck, getDueFlashcards, getDailyLimit, setDailyLimit, getDecks, importFlashcardsFromSheet, getFlashcards } from '../services/flashcardService';
+import { AnkiStats, Deck, Flashcard, TranslationRecord } from '../types';
+import { getAnkiStats, createDeck, deleteDeck, getDueFlashcards, getDailyLimit, setDailyLimit, getDecks, importFlashcardsFromSheet, getFlashcards, getTranslations, deleteFlashcard, deleteTranslation } from '../services/flashcardService';
 
 interface DashboardProps {
   onOpenFlashcards: (deckId?: string) => void;
@@ -84,6 +84,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // State for deck detail view
   const [viewingDeckId, setViewingDeckId] = useState<string | null>(null);
   const [deckVocabulary, setDeckVocabulary] = useState<Flashcard[]>([]);
+  const [deckTranslations, setDeckTranslations] = useState<TranslationRecord[]>([]);
+  const [activeTab, setActiveTab] = useState<'vocab' | 'translations'>('vocab');
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => { if (!isSyncing && syncKey) refreshAllData(); }, [syncKey, dueCount, isSyncing]);
@@ -105,14 +107,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
           if (viewingDeckId) {
               const allCards = await getFlashcards();
               setDeckVocabulary(allCards.filter(c => c.deckId === viewingDeckId));
+              const allTrans = await getTranslations();
+              setDeckTranslations(allTrans.filter(t => t.deckId === viewingDeckId));
           }
       } catch (e) { console.error(e); }
   };
 
   const handleOpenDeckDetail = async (deckId: string) => {
       setViewingDeckId(deckId);
+      setActiveTab('vocab');
       const allCards = await getFlashcards();
       setDeckVocabulary(allCards.filter(c => c.deckId === deckId));
+      const allTrans = await getTranslations();
+      setDeckTranslations(allTrans.filter(t => t.deckId === deckId));
   };
 
   const handleUpdateLimit = () => { setDailyLimit(tempDailyLimit); setShowSettings(false); refreshAllData(); };
@@ -129,6 +136,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
           refreshAllData();
       } catch (e) { alert("Lỗi khi import. Hãy chắc chắn link đúng định dạng."); }
       finally { setIsImporting(false); }
+  };
+
+  const handleDeleteFlashcard = async (id: string) => {
+      if (confirm("Xóa từ vựng này khỏi bộ thẻ?")) {
+          await deleteFlashcard(id);
+          refreshAllData();
+      }
+  };
+
+  const handleDeleteTranslation = async (id: string) => {
+      if (confirm("Xóa bản dịch này khỏi bộ thẻ?")) {
+          await deleteTranslation(id);
+          refreshAllData();
+      }
   };
 
   if (!syncKey) {
@@ -156,11 +177,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // --- DECK DETAIL VIEW ---
   if (viewingDeckId) {
       const currentDeck = decks.find(d => d.id === viewingDeckId);
+      const stats = deckStatsMap[viewingDeckId];
+      
       const filteredVocab = deckVocabulary.filter(v => 
           v.term.toLowerCase().includes(searchTerm.toLowerCase()) || 
           v.meaning.toLowerCase().includes(searchTerm.toLowerCase())
       );
-      const stats = deckStatsMap[viewingDeckId];
+
+      const filteredTranslations = deckTranslations.filter(t =>
+          t.sourceText.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          t.userTranslation.toLowerCase().includes(searchTerm.toLowerCase())
+      );
 
       return (
           <div className="max-w-7xl mx-auto p-6 md:p-12 min-h-screen animate-in fade-in duration-500">
@@ -175,7 +202,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <div className="w-16 h-16 rounded-[24px] bg-indigo-600 text-white flex items-center justify-center text-3xl shadow-xl">🗂️</div>
                         <div>
                             <h1 className="text-4xl font-black text-slate-900 tracking-tight">{currentDeck?.name}</h1>
-                            <p className="text-xs text-slate-400 font-black uppercase tracking-widest mt-1">Danh sách {deckVocabulary.length} từ vựng</p>
+                            <div className="flex gap-4 mt-1">
+                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{deckVocabulary.length} từ vựng</p>
+                                <span className="text-slate-200">|</span>
+                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{deckTranslations.length} bản dịch</p>
+                            </div>
                         </div>
                       </div>
                   </div>
@@ -183,7 +214,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <div className="relative">
                           <input 
                             type="text" 
-                            placeholder="Tìm từ vựng..." 
+                            placeholder="Tìm kiếm..." 
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="pl-12 pr-6 py-4 rounded-2xl border-2 border-slate-100 bg-white font-bold text-sm w-full sm:w-64 focus:border-indigo-500 outline-none transition-all"
@@ -200,42 +231,101 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
               </div>
 
+              <div className="flex bg-white p-2 rounded-2xl border border-slate-100 shadow-sm w-max mb-8">
+                  <button 
+                    onClick={() => setActiveTab('vocab')} 
+                    className={`px-8 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${activeTab === 'vocab' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                      Từ vựng ({deckVocabulary.length})
+                  </button>
+                  <button 
+                    onClick={() => setActiveTab('translations')} 
+                    className={`px-8 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${activeTab === 'translations' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                      Bản dịch ({deckTranslations.length})
+                  </button>
+              </div>
+
               <div className="bg-white rounded-[48px] border border-slate-100 shadow-2xl overflow-hidden">
-                  <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                          <thead>
-                              <tr className="bg-slate-50 border-b border-slate-100">
-                                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Từ vựng</th>
-                                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Phiên âm</th>
-                                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nghĩa tiếng Việt</th>
-                                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Tiến trình</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50">
-                              {filteredVocab.map(v => (
-                                  <tr key={v.id} className="hover:bg-slate-50/50 transition-colors group">
-                                      <td className="px-8 py-5 font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{v.term}</td>
-                                      <td className="px-8 py-5 font-mono text-slate-400 text-xs">/{v.phonetic || '---'}/</td>
-                                      <td className="px-8 py-5 font-medium text-slate-600">{v.meaning}</td>
-                                      <td className="px-8 py-5">
-                                          {v.level === 0 ? (
-                                              <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-[8px] font-black uppercase tracking-widest">Mới</span>
-                                          ) : v.level === 1 ? (
-                                              <span className="px-3 py-1 bg-orange-50 text-orange-600 rounded-full text-[8px] font-black uppercase tracking-widest">Đang học</span>
-                                          ) : (
-                                              <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[8px] font-black uppercase tracking-widest">Đã thuộc</span>
-                                          )}
-                                      </td>
+                  {activeTab === 'vocab' ? (
+                      <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse">
+                              <thead>
+                                  <tr className="bg-slate-50 border-b border-slate-100">
+                                      <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Từ vựng</th>
+                                      <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Phiên âm</th>
+                                      <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nghĩa tiếng Việt</th>
+                                      <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Tiến trình</th>
+                                      <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest w-10"></th>
                                   </tr>
-                              ))}
-                              {filteredVocab.length === 0 && (
-                                  <tr>
-                                      <td colSpan={4} className="px-8 py-20 text-center text-slate-300 font-bold uppercase text-xs tracking-widest">Không tìm thấy từ vựng nào.</td>
-                                  </tr>
-                              )}
-                          </tbody>
-                      </table>
-                  </div>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50">
+                                  {filteredVocab.map(v => (
+                                      <tr key={v.id} className="hover:bg-slate-50/50 transition-colors group">
+                                          <td className="px-8 py-5 font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{v.term}</td>
+                                          <td className="px-8 py-5 font-mono text-slate-400 text-xs">/{v.phonetic || '---'}/</td>
+                                          <td className="px-8 py-5 font-medium text-slate-600">{v.meaning}</td>
+                                          <td className="px-8 py-5">
+                                              {v.level === 0 ? (
+                                                  <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-[8px] font-black uppercase tracking-widest">Mới</span>
+                                              ) : v.level === 1 ? (
+                                                  <span className="px-3 py-1 bg-orange-50 text-orange-600 rounded-full text-[8px] font-black uppercase tracking-widest">Đang học</span>
+                                              ) : (
+                                                  <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[8px] font-black uppercase tracking-widest">Đã thuộc</span>
+                                              )}
+                                          </td>
+                                          <td className="px-8 py-5">
+                                              <button onClick={() => handleDeleteFlashcard(v.id)} className="p-2 text-slate-200 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100">
+                                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                                              </button>
+                                          </td>
+                                      </tr>
+                                  ))}
+                                  {filteredVocab.length === 0 && (
+                                      <tr>
+                                          <td colSpan={5} className="px-8 py-20 text-center text-slate-300 font-bold uppercase text-xs tracking-widest">Không tìm thấy từ vựng nào.</td>
+                                      </tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  ) : (
+                      <div className="p-8 space-y-6">
+                          {filteredTranslations.map(t => (
+                              <div key={t.id} className="p-8 rounded-[32px] border-2 border-slate-100 hover:border-indigo-100 transition-all group">
+                                  <div className="flex justify-between items-start mb-6">
+                                      <div className="flex items-center gap-3">
+                                          <span className="bg-indigo-600 text-white w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black">{t.score}</span>
+                                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Điểm dịch</span>
+                                      </div>
+                                      <div className="flex items-center gap-4">
+                                          <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{new Date(t.createdAt).toLocaleDateString()}</span>
+                                          <button onClick={() => handleDeleteTranslation(t.id)} className="p-2 text-slate-200 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100">
+                                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                                          </button>
+                                      </div>
+                                  </div>
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                      <div className="space-y-2">
+                                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Tiếng Anh</span>
+                                          <p className="text-sm font-medium text-slate-500 leading-relaxed bg-slate-50 p-6 rounded-2xl italic">{t.sourceText}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                          <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest ml-1">Bản dịch của bạn</span>
+                                          <p className="text-sm font-bold text-slate-900 leading-relaxed bg-indigo-50/30 p-6 rounded-2xl">{t.userTranslation}</p>
+                                      </div>
+                                  </div>
+                                  <div className="mt-6 pt-6 border-t border-slate-100 flex items-center gap-3">
+                                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nhận xét:</span>
+                                      <p className="text-xs font-bold text-slate-600 italic">{t.feedback}</p>
+                                  </div>
+                              </div>
+                          ))}
+                          {filteredTranslations.length === 0 && (
+                              <div className="py-20 text-center text-slate-300 font-bold uppercase text-xs tracking-widest">Chưa có bản dịch nào được lưu.</div>
+                          )}
+                      </div>
+                  )}
               </div>
           </div>
       );

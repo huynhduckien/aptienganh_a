@@ -23,6 +23,16 @@ export interface Deck {
   createdAt: number;
 }
 
+export interface TranslationRecord {
+  id: string;
+  deckId: string;
+  sourceText: string;
+  userTranslation: string;
+  score: number;
+  feedback: string;
+  createdAt: number;
+}
+
 export interface Flashcard {
   id: string;
   term: string;
@@ -99,7 +109,6 @@ export interface ProcessedChunk {
   content?: LessonContent;
 }
 
-// FIX: Added missing exported interfaces used in firebaseService and flashcardService
 export interface StudentAccount {
   key: string;
   name: string;

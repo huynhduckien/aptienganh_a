@@ -1,10 +1,12 @@
-import { Flashcard, ReviewLog, Deck } from "../types";
+
+import { Flashcard, ReviewLog, Deck, TranslationRecord } from "../types";
 
 const DB_NAME = 'PaperLingoDB';
-const DB_VERSION = 7; // Bump version for 'decks' store
+const DB_VERSION = 8; 
 const STORE_FLASHCARDS = 'flashcards';
 const STORE_LOGS = 'review_logs';
 const STORE_DECKS = 'decks';
+const STORE_TRANSLATIONS = 'translations';
 
 export const generateId = (): string => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -17,7 +19,6 @@ const openDB = (): Promise<IDBDatabase> => {
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
       
-      // Cleanup old legacy store if exists
       if (db.objectStoreNames.contains('papers')) {
           db.deleteObjectStore('papers');
       }
@@ -29,9 +30,11 @@ const openDB = (): Promise<IDBDatabase> => {
         const logStore = db.createObjectStore(STORE_LOGS, { keyPath: 'id' });
         logStore.createIndex('timestamp', 'timestamp', { unique: false });
       }
-      // New Decks Store
       if (!db.objectStoreNames.contains(STORE_DECKS)) {
         db.createObjectStore(STORE_DECKS, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORE_TRANSLATIONS)) {
+        db.createObjectStore(STORE_TRANSLATIONS, { keyPath: 'id' });
       }
     };
 
@@ -43,6 +46,41 @@ const openDB = (): Promise<IDBDatabase> => {
       reject((event.target as IDBOpenDBRequest).error);
     };
   });
+};
+
+// --- TRANSLATIONS ---
+
+export const saveTranslationToDB = async (record: TranslationRecord): Promise<void> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_TRANSLATIONS], 'readwrite');
+        const store = tx.objectStore(STORE_TRANSLATIONS);
+        store.put(record);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+};
+
+export const getTranslationsFromDB = async (): Promise<TranslationRecord[]> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_TRANSLATIONS], 'readonly');
+        const store = tx.objectStore(STORE_TRANSLATIONS);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+};
+
+export const deleteTranslationFromDB = async (id: string): Promise<void> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_TRANSLATIONS], 'readwrite');
+        const store = tx.objectStore(STORE_TRANSLATIONS);
+        store.delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
 };
 
 // --- FLASHCARDS ---
@@ -139,14 +177,14 @@ export const getReviewLogsFromDB = async (): Promise<ReviewLog[]> => {
     });
 };
 
-// Helper function to clear all data (Sync logic)
 export const clearAllFlashcardsFromDB = async (): Promise<void> => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_FLASHCARDS, STORE_LOGS, STORE_DECKS], 'readwrite');
+        const tx = db.transaction([STORE_FLASHCARDS, STORE_LOGS, STORE_DECKS, STORE_TRANSLATIONS], 'readwrite');
         tx.objectStore(STORE_FLASHCARDS).clear();
         tx.objectStore(STORE_LOGS).clear();
         tx.objectStore(STORE_DECKS).clear();
+        tx.objectStore(STORE_TRANSLATIONS).clear();
         
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);

@@ -1,9 +1,6 @@
 
-import { Flashcard, StudentAccount, ReviewLog, DictionaryResponse, Deck } from "../types";
+import { Flashcard, StudentAccount, ReviewLog, DictionaryResponse, Deck, TranslationRecord } from "../types";
 
-// --- CẤU HÌNH FIREBASE ---
-// TODO: Thay thế URL bên dưới bằng URL Realtime Database của chính bạn.
-// QUAN TRỌNG: Không được để dấu gạch chéo (/) ở cuối cùng.
 const FIREBASE_URL = "https://nail-schedule-test-default-rtdb.europe-west1.firebasedatabase.app"; 
 
 let currentSyncKey: string | null = null;
@@ -12,12 +9,51 @@ export const setFirebaseSyncKey = (key: string) => {
     currentSyncKey = key;
 };
 
+// --- TRANSLATIONS (User Specific) ---
+
+export const fetchCloudTranslations = async (): Promise<TranslationRecord[]> => {
+  if (!currentSyncKey) return [];
+  try {
+    const response = await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/translations.json`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    if (!data) return [];
+    return Object.values(data);
+  } catch (error) {
+    console.warn("Cloud translations fetch failed", error);
+    return [];
+  }
+};
+
+export const saveCloudTranslation = async (record: TranslationRecord): Promise<void> => {
+  if (!currentSyncKey) return;
+  try {
+    await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/translations/${record.id}.json`, {
+      method: 'PUT',
+      body: JSON.stringify(record),
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    console.warn("Cloud translation save failed", error);
+  }
+};
+
+export const deleteCloudTranslation = async (recordId: string): Promise<void> => {
+  if (!currentSyncKey) return;
+  try {
+    await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/translations/${recordId}.json`, {
+      method: 'DELETE'
+    });
+  } catch (error) {
+    console.warn("Cloud translation delete failed", error);
+  }
+};
+
 // --- FLASHCARDS (User Specific) ---
 
 export const fetchCloudFlashcards = async (): Promise<Flashcard[]> => {
-  if (!currentSyncKey) return []; // Không có key thì không load
+  if (!currentSyncKey) return []; 
   try {
-    // URL sẽ là: https://...app/users/...
     const response = await fetch(`${FIREBASE_URL}/users/${currentSyncKey}/flashcards.json`);
     if (!response.ok) {
         console.error(`Firebase Error: ${response.status} ${response.statusText}`);
@@ -99,7 +135,7 @@ export const deleteCloudDeck = async (deckId: string): Promise<void> => {
   }
 };
 
-// --- REVIEW LOGS (User Specific - NEW for Statistics) ---
+// --- REVIEW LOGS ---
 
 export const fetchCloudReviewLogs = async (): Promise<ReviewLog[]> => {
   if (!currentSyncKey) return [];
@@ -130,39 +166,9 @@ export const saveCloudReviewLog = async (log: ReviewLog): Promise<void> => {
   }
 };
 
-// --- DICTIONARY CACHE (Global Shared) ---
-
-export const fetchCloudDictionary = async (): Promise<Record<string, DictionaryResponse>> => {
-  try {
-    const response = await fetch(`${FIREBASE_URL}/paperlingo/dictionary.json`);
-    if (!response.ok) return {};
-    
-    const data = await response.json();
-    return data || {};
-  } catch (error) {
-    console.warn("Cloud dictionary fetch failed", error);
-    return {};
-  }
-};
-
-export const saveCloudDictionaryItem = async (term: string, data: DictionaryResponse): Promise<void> => {
-  try {
-    const safeKey = btoa(term.trim().toLowerCase()).replace(/=/g, ''); 
-    
-    await fetch(`${FIREBASE_URL}/paperlingo/dictionary/${safeKey}.json`, {
-      method: 'PUT',
-      body: JSON.stringify({ ...data, originalTerm: term }),
-      headers: { 'Content-Type': 'application/json' }
-    });
-  } catch (error) {
-    console.warn("Cloud dictionary item save failed", error);
-  }
-};
-
 // --- ADMIN MANAGEMENT ---
 
 export const createStudentAccount = async (name: string): Promise<StudentAccount> => {
-    // Tạo key ngẫu nhiên dễ nhớ hơn UUID: tên-số (ví dụ: hieu-8392)
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const safeName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
     const key = `${safeName}-${randomSuffix}`;
@@ -198,7 +204,6 @@ export const getAllStudents = async (): Promise<StudentAccount[]> => {
     }
 };
 
-// Kiểm tra xem key học viên nhập có tồn tại trong hệ thống không
 export const verifyStudentKey = async (key: string): Promise<StudentAccount | null> => {
     try {
         const response = await fetch(`${FIREBASE_URL}/admin/students/${key}.json`);

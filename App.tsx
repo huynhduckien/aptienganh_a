@@ -190,6 +190,7 @@ const App: React.FC = () => {
                   decks={decks}
                   onComplete={() => {}}
                   onNext={() => setCurrentChunkIndex(prev => Math.min(prev + 1, currentLessonChunks.length - 1))}
+                  onClose={() => { setShowLesson(false); refreshAppData(); }}
                   onLookup={handleAddFlashcard}
                   onContentUpdate={handleUpdateChunkContent}
                   isLast={currentChunkIndex === currentLessonChunks.length - 1}

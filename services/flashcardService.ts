@@ -1,14 +1,11 @@
 
-import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint, AnkiStats, Deck } from "../types";
-import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB, saveDeckToDB, getDecksFromDB, deleteDeckFromDB, deleteFlashcardFromDB } from "./db";
-import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey, fetchCloudReviewLogs, saveCloudReviewLog, fetchCloudDecks, saveCloudDeck, deleteCloudDeck, deleteCloudFlashcard } from "./firebaseService";
+import { Flashcard, ReviewRating, ReviewLog, ChartDataPoint, AnkiStats, Deck, TranslationRecord } from "../types";
+import { getFlashcardsFromDB, saveFlashcardToDB, generateId, clearAllFlashcardsFromDB, saveReviewLogToDB, getReviewLogsFromDB, saveDeckToDB, getDecksFromDB, deleteDeckFromDB, deleteFlashcardFromDB, saveTranslationToDB, getTranslationsFromDB, deleteTranslationFromDB } from "./db";
+import { fetchCloudFlashcards, saveCloudFlashcard, setFirebaseSyncKey, fetchCloudReviewLogs, saveCloudReviewLog, fetchCloudDecks, saveCloudDeck, deleteCloudDeck, deleteCloudFlashcard, fetchCloudTranslations, saveCloudTranslation, deleteCloudTranslation } from "./firebaseService";
 
 let hasSynced = false;
 
-const ONE_MINUTE = 60 * 1000;
 const ONE_DAY = 24 * 60 * 60 * 1000;
-const LEARNING_STEPS = [1, 10]; 
-const GRADUATING_INTERVAL = 1; 
 const STARTING_EASE = 2.5;
 const MASTERED_INTERVAL = 36500; 
 
@@ -18,6 +15,7 @@ export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     hasSynced = false;
     await getFlashcards(); 
     await getDecks();
+    await getTranslations(); 
     try {
         const cloudLogs = await fetchCloudReviewLogs();
         if (cloudLogs && cloudLogs.length > 0) {
@@ -28,6 +26,39 @@ export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     } catch (e) {
         console.warn("Failed to sync review logs", e);
     }
+};
+
+export const getTranslations = async (): Promise<TranslationRecord[]> => {
+    try {
+        let local = await getTranslationsFromDB();
+        if (local.length === 0 && navigator.onLine) {
+            const cloud = await fetchCloudTranslations();
+            if (cloud.length > 0) {
+                for (const r of cloud) await saveTranslationToDB(r);
+                local = cloud;
+            }
+        }
+        return local;
+    } catch (e) { return []; }
+};
+
+export const saveTranslation = async (deckId: string, sourceText: string, userTranslation: string, score: number, feedback: string): Promise<void> => {
+    const record: TranslationRecord = {
+        id: generateId(),
+        deckId,
+        sourceText,
+        userTranslation,
+        score,
+        feedback,
+        createdAt: Date.now()
+    };
+    await saveTranslationToDB(record);
+    saveCloudTranslation(record);
+};
+
+export const deleteTranslation = async (id: string): Promise<void> => {
+    await deleteTranslationFromDB(id);
+    deleteCloudTranslation(id);
 };
 
 export const createDeck = async (name: string, description?: string): Promise<Deck> => {
@@ -128,90 +159,59 @@ export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'next
   return true;
 };
 
-// --- IMPORT & FILTERING LOGIC ---
-const parseCSV = (text: string): string[][] => {
-    const rows: string[][] = [];
-    let currentRow: string[] = [];
-    let currentCell = '';
-    let insideQuotes = false;
-    for (let i = 0; i < text.length; i++) {
-        const char = text[i];
-        const nextChar = text[i + 1];
-        if (char === '"') {
-            if (insideQuotes && nextChar === '"') { currentCell += '"'; i++; }
-            else { insideQuotes = !insideQuotes; }
-        } else if (char === ',' && !insideQuotes) {
-            currentRow.push(currentCell.trim());
-            currentCell = '';
-        } else if ((char === '\r' || char === '\n') && !insideQuotes) {
-            if (char === '\r' && nextChar === '\n') i++;
-            if (currentCell || currentRow.length > 0) {
-                currentRow.push(currentCell.trim());
-                rows.push(currentRow);
-                currentRow = [];
-                currentCell = '';
-            }
-        } else { currentCell += char; }
-    }
-    if (currentCell || currentRow.length > 0) { currentRow.push(currentCell.trim()); rows.push(currentRow); }
-    return rows;
+export const deleteFlashcard = async (id: string): Promise<void> => {
+    await deleteFlashcardFromDB(id);
+    deleteCloudFlashcard(id);
 };
 
-export const importFlashcardsFromSheet = async (sheetUrl: string, deckId?: string): Promise<{ added: number, total: number, error?: string }> => {
+export const importFlashcardsFromSheet = async (url: string, deckId: string): Promise<{ added: number; total: number; error?: string }> => {
     try {
-        const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
-        if (!match) return { added: 0, total: 0, error: "Link Google Sheet không hợp lệ." };
-        const csvUrl = `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=csv`;
+        const sheetIdMatch = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+        if (!sheetIdMatch) return { added: 0, total: 0, error: "Link Google Sheet không hợp lệ." };
+        
+        const sheetId = sheetIdMatch[1];
+        const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+        
         const response = await fetch(csvUrl);
-        if (!response.ok) return { added: 0, total: 0, error: "Không thể truy cập Sheet. Hãy đảm bảo Sheet ở chế độ công khai." };
-
+        if (!response.ok) return { added: 0, total: 0, error: "Không thể truy cập Google Sheet. Hãy chắc chắn nó đã được chia sẻ công khai." };
+        
         const csvText = await response.text();
-        const rows = parseCSV(csvText);
-        if (rows.length < 2) return { added: 0, total: 0, error: "Sheet không có dữ liệu." };
+        const rows = csvText.split(/\r?\n/).map(row => row.split(','));
+        
+        if (rows.length === 0) return { added: 0, total: 0, error: "Tệp rỗng." };
 
-        const header = rows[0].map(h => h.toLowerCase());
-        const idxTerm = header.findIndex(h => h.includes('từ') || h.includes('word') || h.includes('term'));
-        const idxMeaning = header.findIndex(h => h.includes('nghĩa') || h.includes('meaning'));
-        const idxPhonetic = header.findIndex(h => h.includes('phiên âm') || h.includes('phonetic') || h.includes('ipa'));
-
-        if (idxTerm === -1 || idxMeaning === -1) return { added: 0, total: 0, error: "Thiếu cột 'Từ' hoặc 'Nghĩa'." };
-
-        const allCards = await getFlashcards();
-        const existingTerms = new Set(allCards.filter(c => c.deckId === deckId).map(c => c.term.toLowerCase().trim()));
-
+        const startIdx = (rows[0][0].toLowerCase() === 'term' || rows[0][0].toLowerCase() === 'từ') ? 1 : 0;
+        
         let addedCount = 0;
-        let processedCount = 0;
+        let totalCount = 0;
 
-        for (let i = 1; i < rows.length; i++) {
+        for (let i = startIdx; i < rows.length; i++) {
             const row = rows[i];
-            const term = (row[idxTerm] || "").trim();
-            const meaning = (row[idxMeaning] || "").trim();
-            const phonetic = idxPhonetic !== -1 ? (row[idxPhonetic] || "").trim() : "";
+            if (row.length < 2 || !row[0].trim()) continue;
+            
+            totalCount++;
+            const term = row[0].trim();
+            const meaning = row[1].trim();
+            const explanation = row[2]?.trim() || "";
+            const phonetic = row[3]?.trim() || "";
 
-            if (term && meaning) {
-                processedCount++;
-                if (!existingTerms.has(term.toLowerCase())) {
-                    const success = await saveFlashcard({ term, meaning, phonetic, explanation: "", deckId });
-                    if (success) {
-                        addedCount++;
-                        existingTerms.add(term.toLowerCase());
-                    }
-                }
-            }
+            const success = await saveFlashcard({ term, meaning, explanation, phonetic, deckId });
+            if (success) addedCount++;
         }
-        return { added: addedCount, total: processedCount };
+
+        return { added: addedCount, total: totalCount };
     } catch (e) {
-        return { added: 0, total: 0, error: "Lỗi xử lý file." };
+        console.error("Sheet import failed", e);
+        return { added: 0, total: 0, error: "Lỗi xử lý file Google Sheet." };
     }
 };
 
-const STORAGE_KEY_LIMIT = 'paperlingo_daily_limit';
 export const getDailyLimit = (): number => {
-    const stored = localStorage.getItem(STORAGE_KEY_LIMIT);
+    const stored = localStorage.getItem('paperlingo_daily_limit');
     return stored ? parseInt(stored, 10) : 50; 
 };
 export const setDailyLimit = (limit: number) => {
-    localStorage.setItem(STORAGE_KEY_LIMIT, limit.toString());
+    localStorage.setItem('paperlingo_daily_limit', limit.toString());
 };
 
 const getStudiedCountToday = async (): Promise<number> => {
