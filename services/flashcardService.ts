@@ -42,7 +42,6 @@ export const setSyncKeyAndSync = async (key: string): Promise<void> => {
     await getFlashcards(); 
 
     // 2. Tải Decks
-    // We call getDecks here to trigger the sync logic within getDecks if it wasn't triggered
     await getDecks();
 
     // 3. Tải Review Logs (Lịch sử học)
@@ -72,12 +71,10 @@ export const createDeck = async (name: string, description?: string): Promise<De
     return deck;
 };
 
-// UPDATED: Added Cloud Fallback for Decks like Flashcards
 export const getDecks = async (): Promise<Deck[]> => {
     try {
         let localDecks = await getDecksFromDB();
 
-        // If local is empty but we have network and a user, try fetching from cloud
         if (localDecks.length === 0 && navigator.onLine) {
             const cloudDecks = await fetchCloudDecks();
             if (cloudDecks.length > 0) {
@@ -95,17 +92,15 @@ export const getDecks = async (): Promise<Deck[]> => {
 };
 
 export const deleteDeck = async (deckId: string): Promise<void> => {
-    // 1. Delete Deck Metadata
     await deleteDeckFromDB(deckId);
     deleteCloudDeck(deckId);
 
-    // 2. Delete All Cards in Deck (Local AND Cloud)
     const allCards = await getFlashcards();
     const cardsInDeck = allCards.filter(c => c.deckId === deckId);
     
     for (const card of cardsInDeck) {
         await deleteFlashcardFromDB(card.id);
-        deleteCloudFlashcard(card.id); // Ensure deletion from cloud
+        deleteCloudFlashcard(card.id);
     }
 };
 
@@ -120,40 +115,30 @@ export const getFlashcards = async (): Promise<Flashcard[]> => {
   try {
     let localCards = await getFlashcardsFromDB();
 
-    // Sync logic
     if (!hasSynced && navigator.onLine) {
        const cloudCards = await fetchCloudFlashcards();
        
        if (cloudCards.length > 0) {
            const mergedMap = new Map<string, Flashcard>();
-           
-           // Load all local cards first
            localCards.forEach(c => mergedMap.set(c.id, c));
            
            for (const cloudCard of cloudCards) {
                const localCard = mergedMap.get(cloudCard.id);
-               
                if (!localCard) {
-                   // Case 1: Exists on Cloud, not Local -> Save Local
                    mergedMap.set(cloudCard.id, cloudCard);
                    await saveFlashcardToDB(cloudCard);
                } else {
-                   // Case 2: Exists on both -> Compare Timestamps (Last Write Wins)
                    const localTime = localCard.lastUpdated || 0;
                    const cloudTime = cloudCard.lastUpdated || 0;
 
                    if (cloudTime > localTime) {
-                       // Cloud is newer
                        mergedMap.set(cloudCard.id, cloudCard);
                        await saveFlashcardToDB(cloudCard);
                    } else if (localTime > cloudTime) {
-                       // Local is newer (e.g. offline study)
                        saveCloudFlashcard(localCard);
                    }
-                   // If equal, do nothing
                }
            }
-           
            localCards = Array.from(mergedMap.values());
        }
        hasSynced = true;
@@ -169,21 +154,23 @@ export const getFlashcards = async (): Promise<Flashcard[]> => {
 export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'nextReview' | 'createdAt' | 'easeFactor' | 'interval' | 'repetitions'>): Promise<boolean> => {
   const cards = await getFlashcards();
   
-  // Strict Duplicate Check: Trim and Lowercase
-  const normalizedTerm = card.term.trim().toLowerCase();
+  // Chuẩn hóa triệt để để so sánh
+  const trimmedTerm = card.term.trim();
+  const normalizedTerm = trimmedTerm.toLowerCase();
   
-  if (cards.some(c => c.term.trim().toLowerCase() === normalizedTerm && c.deckId === card.deckId)) {
-    return false; // Prevent duplicates in SAME deck
+  // Kiểm tra trùng lặp trong cùng một bộ thẻ (deckId)
+  if (cards.some(c => (c.term || "").trim().toLowerCase() === normalizedTerm && c.deckId === card.deckId)) {
+    return false;
   }
 
   const newCard: Flashcard = {
     ...card,
-    term: card.term.trim(), // Ensure saved term is trimmed
+    term: trimmedTerm, 
     id: generateId(),
-    level: 0, // 0 = New
+    level: 0,
     nextReview: Date.now(),
     createdAt: Date.now(),
-    lastUpdated: Date.now(), // SYNC TIMESTAMP
+    lastUpdated: Date.now(),
     easeFactor: STARTING_EASE,
     interval: 0,
     repetitions: 0,
@@ -199,7 +186,6 @@ export const saveFlashcard = async (card: Omit<Flashcard, 'id' | 'level' | 'next
 
 // --- IMPORT GOOGLE SHEET LOGIC ---
 
-// Helper để parse CSV (xử lý cả dấu phẩy trong ngoặc kép)
 const parseCSV = (text: string): string[][] => {
     const rows: string[][] = [];
     let currentRow: string[] = [];
@@ -212,7 +198,7 @@ const parseCSV = (text: string): string[][] => {
 
         if (char === '"') {
             if (insideQuotes && nextChar === '"') {
-                currentCell += '"'; // Escape double quotes
+                currentCell += '"';
                 i++;
             } else {
                 insideQuotes = !insideQuotes;
@@ -241,14 +227,12 @@ const parseCSV = (text: string): string[][] => {
 
 export const importFlashcardsFromSheet = async (sheetUrl: string, deckId?: string): Promise<{ added: number, total: number, error?: string }> => {
     try {
-        // 1. Extract Spreadsheet ID
         const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
         if (!match || !match[1]) {
             return { added: 0, total: 0, error: "Link Google Sheet không hợp lệ." };
         }
         const spreadsheetId = match[1];
 
-        // 2. Fetch CSV Data
         const csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`;
         const response = await fetch(csvUrl);
         
@@ -263,7 +247,6 @@ export const importFlashcardsFromSheet = async (sheetUrl: string, deckId?: strin
              return { added: 0, total: 0, error: "File không có dữ liệu hoặc sai định dạng." };
         }
 
-        // 3. Map Columns
         const header = rows[0].map(h => h.toLowerCase());
         
         const idxTerm = header.findIndex(h => h.includes('từ') && !h.includes('nghĩa') && !h.includes('loại'));
@@ -275,53 +258,50 @@ export const importFlashcardsFromSheet = async (sheetUrl: string, deckId?: strin
              return { added: 0, total: 0, error: "Không tìm thấy cột 'Từ' hoặc 'Nghĩa của từ'. Vui lòng kiểm tra lại tiêu đề cột." };
         }
 
-        // --- NEW: DUPLICATE DETECTION OPTIMIZATION ---
-        // Fetch existing cards ONCE to avoid multiple DB calls
+        // Tối ưu hóa: Lấy danh sách từ hiện có một lần duy nhất
         const allCards = await getFlashcards();
         const existingTerms = new Set(
             allCards
-                .filter(c => c.deckId === deckId) // Only check in the target deck
-                .map(c => c.term.trim().toLowerCase()) // Normalize terms
+                .filter(c => c.deckId === deckId)
+                .map(c => (c.term || "").trim().toLowerCase())
         );
 
         let addedCount = 0;
-        let processedCount = 0; // Counts valid rows found in CSV
+        let processedCount = 0;
 
-        // 4. Process Rows
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
             if (row.length <= idxTerm) continue;
 
-            const rawTerm = row[idxTerm];
+            const rawTerm = row[idxTerm] || "";
             const meaning = row[idxMeaning] || "";
-            const phonetic = idxPhonetic !== -1 ? row[idxPhonetic] : "";
-            const type = idxType !== -1 ? row[idxType] : "";
+            const phonetic = idxPhonetic !== -1 ? (row[idxPhonetic] || "") : "";
+            const type = idxType !== -1 ? (row[idxType] || "") : "";
             
             const explanation = type ? `(${type})` : "";
-            const term = rawTerm ? rawTerm.trim() : "";
+            const term = rawTerm.trim();
 
-            // Check if valid row
             if (term && meaning) {
                 processedCount++;
-
-                // CHECK DUPLICATE STRICTLY
                 const normalizedTerm = term.toLowerCase();
+
+                // Kiểm tra trùng lặp dựa trên Set đã chuẩn bị
                 if (existingTerms.has(normalizedTerm)) {
-                    // Skip if already in DB or already added in this batch
                     continue; 
                 }
 
+                // Gọi saveFlashcard với dữ liệu đã được chuẩn hóa
                 const success = await saveFlashcard({
                     term,
                     meaning,
                     phonetic,
                     explanation,
-                    deckId // Pass deckId
+                    deckId
                 });
                 
                 if (success) {
                     addedCount++;
-                    existingTerms.add(normalizedTerm); // Add to Set to prevent duplicates within the sheet itself
+                    existingTerms.add(normalizedTerm); // Cập nhật Set để tránh trùng lặp trong cùng một file sheet
                 }
             }
         }
@@ -356,74 +336,56 @@ const getStudiedCountToday = async (): Promise<number> => {
     return logs.filter(l => l.timestamp >= todayTs).length;
 };
 
-// UPDATED: Supports filtering by deckId
 export const getDueFlashcards = async (deckId?: string): Promise<Flashcard[]> => {
   const cards = await getFlashcards();
   const now = Date.now();
   const limit = getDailyLimit();
   
-  // Filter by Deck if provided
   let activeCards = cards.filter(card => card.interval < 10000);
   if (deckId) {
       activeCards = activeCards.filter(c => c.deckId === deckId);
   }
 
-  // FIX: Sắp xếp ưu tiên thẻ Learning/Again lên đầu để không bị mất khi cắt giới hạn
   const allDue = activeCards.filter(card => card.nextReview <= now).sort((a,b) => {
-      // 1. Ưu tiên thẻ đang học dở (interval < 1 ngày) hoặc thẻ Again
       const aIsLearning = a.interval < 1;
       const bIsLearning = b.interval < 1;
-      
-      if (aIsLearning && !bIsLearning) return -1; // a lên đầu
-      if (!aIsLearning && bIsLearning) return 1;  // b lên đầu
-      
-      // 2. Nếu cùng loại thì sắp xếp theo thời gian hết hạn (cũ nhất lên trước)
+      if (aIsLearning && !bIsLearning) return -1;
+      if (!aIsLearning && bIsLearning) return 1;
       return a.nextReview - b.nextReview;
   });
   
-  // Global Limit applies globally. If reviewing specific deck, we might want to relax this?
-  // For now, let's keep daily limit global.
   const studiedToday = await getStudiedCountToday();
   const remainingQuota = Math.max(0, limit - studiedToday);
   
   return allDue.slice(0, remainingQuota);
 };
 
-// NEW: Get Persistent Forgotten Cards
 export const getForgottenFlashcards = async (deckId?: string): Promise<Flashcard[]> => {
     const cards = await getFlashcards();
     let forgotten = cards.filter(c => c.isForgotten === true);
-    
     if (deckId) {
         forgotten = forgotten.filter(c => c.deckId === deckId);
     }
     return forgotten;
 };
 
-// --- ANKI STATS GENERATOR (Supports Deck Filtering) ---
 export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
     let cards = await getFlashcards();
     let logs = await getReviewLogsFromDB();
     const now = Date.now();
 
-    // Filter by Deck
     if (deckId) {
         cards = cards.filter(c => c.deckId === deckId);
-        // Optimization: Filter logs by card IDs in this deck
         const cardIds = new Set(cards.map(c => c.id));
         logs = logs.filter(l => cardIds.has(l.cardId));
     }
     
-    // 1. TODAY
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const todayTs = startOfDay.getTime();
     const todayLogs = logs.filter(l => l.timestamp >= todayTs);
     
-    // Calculate due count for display purposes in stats (without limit trimming)
     const rawDueCount = cards.filter(c => c.interval < 10000 && c.nextReview <= now).length;
-    
-    // Calculate forgotten count
     const forgottenCount = cards.filter(c => c.isForgotten === true).length;
 
     const todayStats = {
@@ -433,7 +395,6 @@ export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
         matureCount: todayLogs.filter(l => l.rating !== 'again').length
     };
 
-    // 2. COUNTS (Pie Chart)
     const counts = {
         new: 0,
         learning: 0,
@@ -445,7 +406,7 @@ export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
 
     cards.forEach(c => {
         if (c.interval >= 10000) {
-            counts.mature++; // Mastered count as mature/done
+            counts.mature++;
         } else if (c.interval === 0 && c.repetitions === 0) {
             counts.new++;
         } else if (c.interval < 1) { 
@@ -457,7 +418,6 @@ export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
         }
     });
 
-    // 3. FORECAST (Future Due Dates) - 365 days
     const FORECAST_DAYS = 365;
     const forecastYoung = new Array(FORECAST_DAYS).fill(0);
     const forecastMature = new Array(FORECAST_DAYS).fill(0);
@@ -465,39 +425,29 @@ export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
     let maxForecast = 0;
     
     cards.forEach(c => {
-        if (c.interval >= 10000) return; // Skip mastered
-
+        if (c.interval >= 10000) return;
         let diffDays = 0;
         if (c.nextReview <= now) {
-            // Overdue cards go to "Today" (Day 0) to represent backlog
             diffDays = 0;
         } else {
             const diffTime = c.nextReview - now;
             diffDays = Math.ceil(diffTime / ONE_DAY);
         }
-
         if (diffDays < FORECAST_DAYS && diffDays >= 0) {
-            // Anki Definition: Mature = Interval >= 21 days
-            if (c.interval >= 21) {
-                forecastMature[diffDays]++;
-            } else {
-                forecastYoung[diffDays]++;
-            }
+            if (c.interval >= 21) forecastMature[diffDays]++;
+            else forecastYoung[diffDays]++;
         }
     });
 
-    // Calculate max for global scale (optional)
     for(let i=0; i<FORECAST_DAYS; i++) {
         const total = forecastYoung[i] + forecastMature[i];
         if (total > maxForecast) maxForecast = total;
     }
 
-    // 4. INTERVALS
     const intervalBuckets = [0, 0, 0, 0, 0, 0, 0];
     const intervalLabels = ['0-1d', '2-7d', '8-30d', '1-3m', '3-6m', '6m-1y', '>1y'];
-    
     cards.forEach(c => {
-        if (c.interval >= 10000) return; // Don't chart mastered cards in intervals
+        if (c.interval >= 10000) return;
         const days = c.interval;
         if (days <= 1) intervalBuckets[0]++;
         else if (days <= 7) intervalBuckets[1]++;
@@ -523,38 +473,26 @@ export const getAnkiStats = async (deckId?: string): Promise<AnkiStats> => {
     } as any;
 };
 
-// --- PREVIEW HELPER ---
-
 export const getIntervalPreviewText = (card: Flashcard, rating: ReviewRating): string => {
-    // We calculate a simulation
     const { interval } = calculateNextReview(card, rating, true);
-    
-    if (interval >= 10000) return "Xong"; // "Done" or "Mastered"
-
+    if (interval >= 10000) return "Xong";
     if (interval < 1) {
-        // Minutes
         const mins = Math.round(interval * 24 * 60);
         return mins < 1 ? "< 1m" : `${mins}m`;
     } else {
-        // Days
         const days = Math.round(interval);
         if (days >= 365) return `${(days/365).toFixed(1)}y`;
         return `${days}d`;
     }
 };
 
-// --- CORE SRS ALGORITHM (Modified SM-2) ---
-
 export const calculateNextReview = (
     card: Flashcard, 
     rating: ReviewRating, 
     isPreview: boolean = false
 ): { nextReview: number, interval: number, easeFactor: number, repetitions: number, step: number } => {
-    
     let { interval, easeFactor, repetitions, step = 0 } = card;
     const now = Date.now();
-
-    // 1. EASY: SKIP FOREVER (Mastered)
     if (rating === 'easy') {
         return {
             nextReview: now + (MASTERED_INTERVAL * ONE_DAY),
@@ -564,58 +502,38 @@ export const calculateNextReview = (
             step: 0
         };
     }
-
     const isLearning = interval < 1;
-
     if (isLearning) {
-        // --- LEARNING PHASE ---
-        // Steps: 1m (0), 10m (1) -> Graduate to 1 Day
-        
         if (rating === 'again') {
-            // Reset to Step 1 (1m)
             step = 0;
-            interval = LEARNING_STEPS[0] / (24 * 60); // 1 minute
+            interval = LEARNING_STEPS[0] / (24 * 60);
         } else if (rating === 'hard') {
-            // Repeat current step or use roughly 6 mins avg
-            interval = 6 / (24 * 60); // 6 mins
-            // Do not advance step
+            interval = 6 / (24 * 60);
         } else if (rating === 'good') {
             if (step < LEARNING_STEPS.length - 1) {
-                // Advance Step (1m -> 10m)
                 step++;
                 interval = LEARNING_STEPS[step] / (24 * 60);
             } else {
-                // Graduate to Review Phase (1 Day)
                 step = 0;
                 interval = GRADUATING_INTERVAL;
             }
         }
-
     } else {
-        // --- REVIEW PHASE ---
-        // Card is already graduated (>= 1 day)
-        
         if (rating === 'again') {
-            // Lapse: Forgot the card. Back to Re-learning (10m step)
             step = 0;
-            interval = LEARNING_STEPS[1] / (24 * 60); // 10 mins
-            easeFactor = Math.max(1.3, easeFactor - 0.2); // Penalty
+            interval = LEARNING_STEPS[1] / (24 * 60);
+            easeFactor = Math.max(1.3, easeFactor - 0.2);
             repetitions = 0;
         } else if (rating === 'hard') {
-            // Tough but remembered. Slow growth.
             interval = interval * 1.2;
-            easeFactor = Math.max(1.3, easeFactor - 0.15); // Slight penalty
+            easeFactor = Math.max(1.3, easeFactor - 0.15);
         } else if (rating === 'good') {
-            // Standard growth
             interval = interval * easeFactor;
-            // No ease change usually on good
         }
     }
-
     if (!isPreview && rating !== 'again') {
         repetitions++;
     }
-
     return {
         nextReview: now + (interval * ONE_DAY),
         interval,
@@ -633,12 +551,11 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
   const card = cards[index];
   const { nextReview, interval, easeFactor, repetitions, step } = calculateNextReview(card, rating);
 
-  // UPDATE FORGOTTEN STATE
   let isForgotten = card.isForgotten || false;
   if (rating === 'again') {
-      isForgotten = true; // Mark as forgotten if user clicked Again
+      isForgotten = true;
   } else if (rating === 'good' || rating === 'easy') {
-      isForgotten = false; // Clear forgotten state if user knows it
+      isForgotten = false;
   }
 
   const updatedCard: Flashcard = { 
@@ -650,7 +567,7 @@ export const updateCardStatus = async (cardId: string, rating: ReviewRating): Pr
       step,
       isForgotten,
       level: interval >= 21 ? 2 : 1,
-      lastUpdated: Date.now() // SYNC TIMESTAMP
+      lastUpdated: Date.now()
   };
   
   await saveFlashcardToDB(updatedCard);
