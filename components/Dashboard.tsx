@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { AnkiStats, Deck, Flashcard } from '../types';
-import { getAnkiStats, createDeck, deleteDeck, getDueFlashcards, getDailyLimit, setDailyLimit, getDecks, importFlashcardsFromSheet } from '../services/flashcardService';
+import { getAnkiStats, createDeck, deleteDeck, getDueFlashcards, getDailyLimit, setDailyLimit, getDecks, importFlashcardsFromSheet, getFlashcards } from '../services/flashcardService';
 
 interface DashboardProps {
   onOpenFlashcards: (deckId?: string) => void;
@@ -80,6 +80,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [newDeckName, setNewDeckName] = useState('');
   const [tempDailyLimit, setTempDailyLimit] = useState(getDailyLimit());
   const [isImporting, setIsImporting] = useState(false);
+  
+  // State for deck detail view
+  const [viewingDeckId, setViewingDeckId] = useState<string | null>(null);
+  const [deckVocabulary, setDeckVocabulary] = useState<Flashcard[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => { if (!isSyncing && syncKey) refreshAllData(); }, [syncKey, dueCount, isSyncing]);
 
@@ -96,7 +101,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
               dStats[d.id] = { ...s, due: due.length };
           }
           setDeckStatsMap(dStats);
+
+          if (viewingDeckId) {
+              const allCards = await getFlashcards();
+              setDeckVocabulary(allCards.filter(c => c.deckId === viewingDeckId));
+          }
       } catch (e) { console.error(e); }
+  };
+
+  const handleOpenDeckDetail = async (deckId: string) => {
+      setViewingDeckId(deckId);
+      const allCards = await getFlashcards();
+      setDeckVocabulary(allCards.filter(c => c.deckId === deckId));
   };
 
   const handleUpdateLimit = () => { setDailyLimit(tempDailyLimit); setShowSettings(false); refreshAllData(); };
@@ -134,6 +150,94 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             </div>
         </div>
+      );
+  }
+
+  // --- DECK DETAIL VIEW ---
+  if (viewingDeckId) {
+      const currentDeck = decks.find(d => d.id === viewingDeckId);
+      const filteredVocab = deckVocabulary.filter(v => 
+          v.term.toLowerCase().includes(searchTerm.toLowerCase()) || 
+          v.meaning.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      const stats = deckStatsMap[viewingDeckId];
+
+      return (
+          <div className="max-w-7xl mx-auto p-6 md:p-12 min-h-screen animate-in fade-in duration-500">
+              <button onClick={() => setViewingDeckId(null)} className="mb-10 flex items-center gap-2 text-slate-400 font-black text-xs uppercase tracking-widest hover:text-indigo-600 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                  Quay lại Dashboard
+              </button>
+
+              <div className="flex flex-col lg:flex-row justify-between items-start gap-10 mb-12">
+                  <div className="flex-1">
+                      <div className="flex items-center gap-4 mb-4">
+                        <div className="w-16 h-16 rounded-[24px] bg-indigo-600 text-white flex items-center justify-center text-3xl shadow-xl">🗂️</div>
+                        <div>
+                            <h1 className="text-4xl font-black text-slate-900 tracking-tight">{currentDeck?.name}</h1>
+                            <p className="text-xs text-slate-400 font-black uppercase tracking-widest mt-1">Danh sách {deckVocabulary.length} từ vựng</p>
+                        </div>
+                      </div>
+                  </div>
+                  <div className="w-full lg:w-auto flex flex-col sm:flex-row gap-4">
+                      <div className="relative">
+                          <input 
+                            type="text" 
+                            placeholder="Tìm từ vựng..." 
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="pl-12 pr-6 py-4 rounded-2xl border-2 border-slate-100 bg-white font-bold text-sm w-full sm:w-64 focus:border-indigo-500 outline-none transition-all"
+                          />
+                          <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                      </div>
+                      <button 
+                        onClick={() => onOpenFlashcards(viewingDeckId)} 
+                        className="px-10 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-2xl shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all text-sm uppercase tracking-widest flex items-center justify-center gap-3"
+                      >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m5 3 14 9-14 9V3z"/></svg>
+                          ÔN TẬP NGAY ({stats?.due || 0})
+                      </button>
+                  </div>
+              </div>
+
+              <div className="bg-white rounded-[48px] border border-slate-100 shadow-2xl overflow-hidden">
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                          <thead>
+                              <tr className="bg-slate-50 border-b border-slate-100">
+                                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Từ vựng</th>
+                                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Phiên âm</th>
+                                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nghĩa tiếng Việt</th>
+                                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Tiến trình</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                              {filteredVocab.map(v => (
+                                  <tr key={v.id} className="hover:bg-slate-50/50 transition-colors group">
+                                      <td className="px-8 py-5 font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{v.term}</td>
+                                      <td className="px-8 py-5 font-mono text-slate-400 text-xs">/{v.phonetic || '---'}/</td>
+                                      <td className="px-8 py-5 font-medium text-slate-600">{v.meaning}</td>
+                                      <td className="px-8 py-5">
+                                          {v.level === 0 ? (
+                                              <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-[8px] font-black uppercase tracking-widest">Mới</span>
+                                          ) : v.level === 1 ? (
+                                              <span className="px-3 py-1 bg-orange-50 text-orange-600 rounded-full text-[8px] font-black uppercase tracking-widest">Đang học</span>
+                                          ) : (
+                                              <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[8px] font-black uppercase tracking-widest">Đã thuộc</span>
+                                          )}
+                                      </td>
+                                  </tr>
+                              ))}
+                              {filteredVocab.length === 0 && (
+                                  <tr>
+                                      <td colSpan={4} className="px-8 py-20 text-center text-slate-300 font-bold uppercase text-xs tracking-widest">Không tìm thấy từ vựng nào.</td>
+                                  </tr>
+                              )}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+          </div>
       );
   }
 
@@ -193,7 +297,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {decks.map(deck => (
-                          <DeckCard key={deck.id} deck={deck} stats={deckStatsMap[deck.id]} onClick={() => onOpenFlashcards(deck.id)} onDelete={(e) => { e.stopPropagation(); if(confirm('Xóa?')) deleteDeck(deck.id).then(refreshAllData); }} onImport={(e) => handleImportSheet(e, deck.id)} />
+                          <DeckCard key={deck.id} deck={deck} stats={deckStatsMap[deck.id]} onClick={() => handleOpenDeckDetail(deck.id)} onDelete={(e) => { e.stopPropagation(); if(confirm('Xóa?')) deleteDeck(deck.id).then(refreshAllData); }} onImport={(e) => handleImportSheet(e, deck.id)} />
                       ))}
                       {decks.length === 0 && <div className="md:col-span-2 py-20 border-2 border-dashed border-slate-100 rounded-[48px] text-center bg-white text-slate-400 font-bold uppercase text-xs">Chưa có bộ thẻ vựng.</div>}
                   </div>
