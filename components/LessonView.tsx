@@ -11,7 +11,7 @@ interface LessonViewProps {
   decks: Deck[];
   onComplete: (chunkId: number) => void;
   onNext: () => void;
-  onClose: () => void; // Thêm prop onClose để thoát bài học
+  onClose: () => void; 
   onLookup: (term: string, meaning: string, explanation: string, phonetic: string, deckId?: string) => Promise<boolean>;
   onContentUpdate: (chunkId: number, content: LessonContent) => void; 
   isLast: boolean;
@@ -91,9 +91,16 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
           const range = winSelection.getRangeAt(0);
           const rect = range.getBoundingClientRect();
           const containerRect = textCardRef.current?.getBoundingClientRect();
+          
           if (containerRect) {
-            const placement = rect.top < 160 ? 'bottom' : 'top';
-            let top = placement === 'top' ? rect.top - containerRect.top - 12 : rect.bottom - containerRect.top + 12;
+            // Tăng ngưỡng lên 280px để đảm bảo popup không bị che bởi header khi chọn 'top'
+            const placement = rect.top < 280 ? 'bottom' : 'top';
+            
+            // Tính toán vị trí top chính xác hơn dựa trên placement
+            let top = placement === 'top' 
+                ? rect.top - containerRect.top - 8 
+                : rect.bottom - containerRect.top + 8;
+
             setSelection({ 
                 text, top, left: rect.left - containerRect.left + (rect.width / 2), 
                 show: true, loading: true, placement, isSaved: false, 
@@ -222,9 +229,11 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
         </div>
 
         <div className={`flex-1 grid grid-cols-1 lg:grid-cols-2 lg:divide-x divide-slate-100 p-0`}>
-            <div className={`p-8 md:p-12 overflow-y-auto custom-scrollbar lg:sticky lg:top-0 lg:max-h-[calc(100vh-200px)]`}>
+            {/* Column contains the text. We ensure it's overflow-visible so popups aren't clipped */}
+            <div className={`p-8 md:p-12 overflow-y-auto custom-scrollbar lg:sticky lg:top-0 lg:max-h-[calc(100vh-200px)] overflow-visible`}>
                 <div className="relative group" ref={textCardRef}>
-                    <div className={`px-12 py-14 rounded-[40px] relative overflow-hidden transition-all duration-300 ${getThemeClasses()} border-2 min-h-[400px]`} onMouseUp={handleTextMouseUp} translate="no">
+                    {/* The actual text container. Removed overflow-hidden to let selection popup breathe */}
+                    <div className={`px-12 py-14 rounded-[40px] relative transition-all duration-300 ${getThemeClasses()} border-2 min-h-[400px]`} onMouseUp={handleTextMouseUp} translate="no">
                         <div className="absolute left-0 top-0 bottom-0 w-2.5 bg-indigo-500/30"></div>
                         <p className={`${settings.fontFamily} ${settings.fontSize} leading-[2.1] text-justify hyphens-auto break-words ${language === 'zh' ? 'tracking-widest' : 'tracking-normal'}`}>
                           {chunk.text}
@@ -232,43 +241,43 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                     </div>
 
                     {selection.show && (
-                        <div className={`absolute z-50 transform -translate-x-1/2 ${selection.placement === 'top' ? '-translate-y-full' : ''}`} style={{ top: selection.top, left: selection.left }}>
+                        <div className={`absolute z-[60] transform -translate-x-1/2 ${selection.placement === 'top' ? '-translate-y-full' : ''}`} style={{ top: selection.top, left: selection.left }}>
                              <div className="relative flex flex-col items-center">
                                 {selection.placement === 'bottom' && <div className={`w-3 h-3 rotate-45 transform translate-y-1.5 ${getSelectionColor()}`}></div>}
-                                <div className={`${getSelectionColor()} text-white rounded-[24px] shadow-2xl w-max min-w-[240px] max-w-[340px] px-6 py-5 text-left ring-8 ring-white/5 border border-white/10`}>
+                                <div className={`${getSelectionColor()} text-white rounded-[24px] shadow-2xl w-max min-w-[240px] max-w-[340px] px-5 py-4 text-left ring-4 ring-white/10 border border-white/20`}>
                                     {selection.loading ? 
                                       <div className="flex items-center justify-center gap-3 text-xs font-black animate-pulse py-4">Tra từ...</div> 
                                       : (
-                                        <div className="space-y-4">
+                                        <div className="space-y-3">
                                             <div className="flex flex-col">
-                                                <div className="text-xs font-black opacity-50 uppercase tracking-widest mb-1">{selection.text}</div>
-                                                {selection.result?.phonetic && <div className="text-[10px] font-mono opacity-80">/{selection.result.phonetic}/</div>}
+                                                <div className="text-[10px] font-black opacity-50 uppercase tracking-widest mb-0.5">{selection.text}</div>
+                                                {selection.result?.phonetic && <div className="text-[10px] font-mono opacity-80 italic">/{selection.result.phonetic}/</div>}
                                             </div>
                                             <div className="h-[1px] bg-white/10 w-full"></div>
-                                            <div className="text-sm font-bold leading-relaxed">{selection.result?.shortMeaning}</div>
+                                            <div className="text-xs font-bold leading-relaxed">{selection.result?.shortMeaning}</div>
                                             
                                             {!selection.isSaved && (
-                                                <div className="pt-2 flex flex-col gap-3">
-                                                    <div className="space-y-1.5">
-                                                        <span className="text-[8px] font-black uppercase tracking-widest opacity-40">Chọn bộ thẻ để lưu:</span>
+                                                <div className="pt-1 flex flex-col gap-2.5">
+                                                    <div className="space-y-1">
+                                                        <span className="text-[8px] font-black uppercase tracking-widest opacity-40">Bộ thẻ:</span>
                                                         <select 
                                                             value={selection.selectedDeckId}
                                                             onChange={(e) => setSelection(prev => ({ ...prev, selectedDeckId: e.target.value }))}
-                                                            className="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-[10px] font-bold text-white focus:outline-none focus:ring-2 focus:ring-white/30 appearance-none cursor-pointer"
+                                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-2 py-1.5 text-[10px] font-bold text-white focus:outline-none appearance-none cursor-pointer"
                                                         >
                                                             {decks.map(d => <option key={d.id} value={d.id} className="text-slate-900">{d.name}</option>)}
                                                             {decks.length === 0 && <option disabled>Chưa có bộ thẻ</option>}
                                                         </select>
                                                     </div>
-                                                    <button onClick={handleSaveCard} className="w-full py-3 bg-white text-indigo-600 font-black rounded-xl hover:bg-white/90 transition-all flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest">
-                                                        LƯU VÀO BỘ THẺ
+                                                    <button onClick={handleSaveCard} className="w-full py-2.5 bg-white text-indigo-600 font-black rounded-lg hover:bg-white/90 transition-all flex items-center justify-center gap-2 text-[9px] uppercase tracking-widest shadow-lg">
+                                                        LƯU VÀO BỘ THÈ
                                                     </button>
                                                 </div>
                                             )}
                                             {selection.isSaved && (
-                                                <div className="py-2 flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-400 rounded-xl font-black text-[10px] uppercase tracking-widest">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                                                    ĐÃ LƯU THÀNH CÔNG
+                                                <div className="py-2 flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-400 rounded-lg font-black text-[9px] uppercase tracking-widest">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                                    ĐÃ LƯU XONG
                                                 </div>
                                             )}
                                         </div>
