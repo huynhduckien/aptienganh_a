@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ProcessedChunk, LessonContent, DictionaryResponse, Deck } from '../types';
-import { explainPhrase } from '../services/geminiService';
+import { ProcessedChunk, LessonContent, DictionaryResponse, Deck, GradingResult } from '../types';
+import { explainPhrase, gradeTranslation } from '../services/geminiService';
 
 interface LessonViewProps {
   chunk: ProcessedChunk;
@@ -51,6 +51,10 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
       fontSize: 'text-xl' 
   });
 
+  // Grading states
+  const [isGrading, setIsGrading] = useState(false);
+  const [gradingResult, setGradingResult] = useState<GradingResult | null>(null);
+
   useEffect(() => {
       const saved = localStorage.getItem('paperlingo_reading_settings');
       if (saved) try { setSettings(JSON.parse(saved)); } catch(e) {}
@@ -66,6 +70,8 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
     setUserTranslation('');
     setSelection({ text: '', top: 0, left: 0, show: false, loading: false, placement: 'top', isSaved: false, selectedDeckId: decks[0]?.id });
     setShowSettings(false);
+    setGradingResult(null);
+    setIsGrading(false);
   }, [chunk.id, decks]);
 
   const handleTextMouseUp = () => {
@@ -120,7 +126,23 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
       else alert("Từ này đã tồn tại trong bộ thẻ đã chọn.");
   };
 
-  const handleFinishChunk = () => {
+  const handleStartGrading = async () => {
+      if (!userTranslation.trim()) {
+          alert("Vui lòng nhập bản dịch của bạn trước khi hoàn thành.");
+          return;
+      }
+      setIsGrading(true);
+      try {
+          const result = await gradeTranslation(chunk.text, userTranslation);
+          setGradingResult(result);
+      } catch (e) {
+          alert("Có lỗi khi chấm điểm. Vui lòng thử lại.");
+      } finally {
+          setIsGrading(false);
+      }
+  };
+
+  const handleContinue = () => {
       onComplete(chunk.id);
       if (!isLast) onNext();
       else window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -257,11 +279,106 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
 
         <div className="px-10 py-10 bg-slate-50/80 border-t border-slate-100 flex flex-col items-center justify-center gap-6">
             <div className="w-full max-w-2xl text-center space-y-6">
-                <button onClick={handleFinishChunk} className="w-full bg-indigo-600 text-white text-xl font-black py-7 rounded-[32px] shadow-2xl hover:bg-indigo-700 hover:scale-[1.02] transition-all active:scale-95 flex items-center justify-center gap-4">
-                    HOÀN THÀNH VÀ TIẾP TỤC →
+                <button 
+                  onClick={handleStartGrading} 
+                  disabled={isGrading || !!gradingResult}
+                  className={`w-full bg-indigo-600 text-white text-xl font-black py-7 rounded-[32px] shadow-2xl transition-all active:scale-95 flex items-center justify-center gap-4 ${isGrading || gradingResult ? 'opacity-50 cursor-not-allowed' : 'hover:bg-indigo-700 hover:scale-[1.02]'}`}
+                >
+                    {isGrading ? (
+                      <div className="flex items-center gap-3">
+                        <div className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ĐANG CHẤM ĐIỂM AI...
+                      </div>
+                    ) : gradingResult ? "ĐÃ CHẤM ĐIỂM XONG" : "HOÀN THÀNH VÀ CHẤM ĐIỂM →"}
                 </button>
             </div>
         </div>
+
+        {/* GRADING REPORT MODAL */}
+        {gradingResult && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/90 backdrop-blur-xl p-4 md:p-8 animate-in fade-in duration-300">
+                <div className="bg-white w-full max-w-5xl rounded-[48px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in duration-300">
+                    
+                    {/* Header Report */}
+                    <div className="bg-slate-900 p-10 flex flex-col md:flex-row justify-between items-center gap-8 border-b border-white/10">
+                        <div className="flex items-center gap-6">
+                            <div className="w-24 h-24 rounded-full bg-indigo-600 flex items-center justify-center text-4xl font-black text-white shadow-2xl shadow-indigo-500/50">
+                                {gradingResult.score}
+                            </div>
+                            <div>
+                                <h3 className="text-white text-3xl font-black tracking-tight">Báo cáo kết quả dịch</h3>
+                                <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mt-1">Đánh giá bởi Gemini AI</p>
+                            </div>
+                        </div>
+                        <button 
+                          onClick={handleContinue}
+                          className="px-10 py-5 bg-white text-slate-900 font-black rounded-2xl hover:bg-slate-100 transition-all flex items-center gap-3 shadow-xl active:scale-95"
+                        >
+                          TIẾP TỤC ĐOẠN SAU
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                        </button>
+                    </div>
+
+                    <div className="p-10 overflow-y-auto custom-scrollbar flex-1 space-y-12">
+                        
+                        {/* Summary */}
+                        <div className="bg-slate-50 p-8 rounded-[32px] border border-slate-100">
+                            <h4 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em] mb-4">Nhận xét tổng quan</h4>
+                            <p className="text-xl font-medium text-slate-800 leading-relaxed italic">"{gradingResult.feedback}"</p>
+                        </div>
+
+                        {/* Comparison */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <div className="space-y-4">
+                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] px-4">Bản dịch của bạn</h4>
+                                <div className="p-8 rounded-[32px] bg-white border-2 border-slate-100 text-slate-600 leading-relaxed font-medium min-h-[160px]">
+                                    {userTranslation}
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                <h4 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.3em] px-4">Bản dịch gợi ý tối ưu</h4>
+                                <div className="p-8 rounded-[32px] bg-emerald-50 border-2 border-emerald-100 text-slate-800 leading-relaxed font-bold min-h-[160px]">
+                                    {gradingResult.modelTranslation}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Strengths & Improvements */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <div className="bg-white border-2 border-slate-100 rounded-[32px] p-8">
+                                <h4 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.3em] mb-6 flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                    Điểm sáng trong bài
+                                </h4>
+                                <ul className="space-y-4">
+                                    {gradingResult.strengths.map((s, i) => (
+                                        <li key={i} className="flex gap-4 text-slate-700 text-sm font-bold">
+                                            <span className="text-emerald-500">✓</span>
+                                            {s}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                            <div className="bg-white border-2 border-slate-100 rounded-[32px] p-8">
+                                <h4 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.3em] mb-6 flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                                    Cần cải thiện
+                                </h4>
+                                <ul className="space-y-4">
+                                    {gradingResult.improvements.map((s, i) => (
+                                        <li key={i} className="flex gap-4 text-slate-700 text-sm font-bold">
+                                            <span className="text-amber-500">→</span>
+                                            {s}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        )}
       </div>
     </div>
   );

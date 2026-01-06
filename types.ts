@@ -6,6 +6,14 @@ export interface DictionaryResponse {
   originalTerm?: string;
 }
 
+export interface GradingResult {
+  score: number;
+  feedback: string;
+  modelTranslation: string;
+  strengths: string[];
+  improvements: string[];
+}
+
 export type ReviewRating = 'again' | 'hard' | 'good' | 'easy';
 
 export interface Deck {
@@ -22,24 +30,24 @@ export interface Flashcard {
   explanation: string;
   phonetic: string;
   
-  deckId?: string; // New field to link card to a deck
+  deckId?: string; 
 
   // SRS Fields
-  level: number; // 0: New, 1: Learning, 2+: Review/Mastered
-  nextReview: number; // Timestamp
+  level: number; 
+  nextReview: number; 
   createdAt: number;
-  lastUpdated?: number; // NEW: Timestamp for sync resolution (Last Write Wins)
+  lastUpdated?: number; 
   
   // Advanced SRS
-  easeFactor: number; // Default 2.5
-  interval: number; // Days (if >= 1) or Minutes (if < 1)
-  repetitions: number; // Consecutive correct reviews
+  easeFactor: number; 
+  interval: number; 
+  repetitions: number; 
   
-  // NEW: Anki Learning Steps tracker
-  step?: number; // 0 = 1st step (1m), 1 = 2nd step (10m), etc.
+  // Anki Learning Steps tracker
+  step?: number; 
 
   // FORGOTTEN STATE
-  isForgotten?: boolean; // True if user rated 'Again', cleared when 'Good'/'Easy'
+  isForgotten?: boolean; 
 }
 
 export interface ReviewLog {
@@ -47,13 +55,6 @@ export interface ReviewLog {
     cardId: string;
     rating: ReviewRating;
     timestamp: number;
-}
-
-export interface StudentAccount {
-    key: string;
-    name: string;
-    createdAt: number;
-    lastActive?: number;
 }
 
 export interface AnkiStats {
@@ -82,25 +83,13 @@ export interface AnkiStats {
         data: number[];
     };
     due: number;
-    forgotten: number; // New stat
-}
-
-export interface ChartDataPoint {
-  label: string;
-  value: number;
-}
-
-export interface QuizQuestion {
-  question: string;
-  options: string[];
-  correctAnswer: number;
-  explanation: string;
+    forgotten: number; 
 }
 
 export interface LessonContent {
   cleanedSourceText: string;
   referenceTranslation: string;
-  quiz: QuizQuestion[];
+  quiz: any[];
   source: 'AI' | 'Fallback' | 'Manual';
 }
 
@@ -108,4 +97,16 @@ export interface ProcessedChunk {
   id: number;
   text: string;
   content?: LessonContent;
+}
+
+// FIX: Added missing exported interfaces used in firebaseService and flashcardService
+export interface StudentAccount {
+  key: string;
+  name: string;
+  createdAt: number;
+}
+
+export interface ChartDataPoint {
+  label: string;
+  value: number;
 }
