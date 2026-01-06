@@ -101,7 +101,7 @@ export interface LessonContent {
   cleanedSourceText: string;
   referenceTranslation: string;
   quiz: QuizQuestion[];
-  source: 'AI' | 'Fallback';
+  source: 'AI' | 'Fallback' | 'Manual';
 }
 
 export interface ProcessedChunk {
