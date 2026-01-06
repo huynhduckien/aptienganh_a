@@ -1,15 +1,16 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ProcessedChunk, LessonContent, DictionaryResponse } from '../types';
+import { ProcessedChunk, LessonContent, DictionaryResponse, Deck } from '../types';
 import { explainPhrase } from '../services/geminiService';
 
 interface LessonViewProps {
   chunk: ProcessedChunk;
   totalChunks: number;
   language: 'en' | 'zh'; 
+  decks: Deck[];
   onComplete: (chunkId: number) => void;
   onNext: () => void;
-  onLookup: (term: string, meaning: string, explanation: string, phonetic: string) => void;
+  onLookup: (term: string, meaning: string, explanation: string, phonetic: string, deckId?: string) => Promise<boolean>;
   onContentUpdate: (chunkId: number, content: LessonContent) => void; 
   isLast: boolean;
 }
@@ -20,9 +21,10 @@ interface SelectionState {
     left: number; 
     show: boolean; 
     loading: boolean; 
-    result?: DictionaryResponse; // Lưu trữ toàn bộ kết quả tra cứu
+    result?: DictionaryResponse; 
     placement: 'top' | 'bottom';
-    isSaved: boolean; // Trạng thái đã nhấn lưu hay chưa
+    isSaved: boolean; 
+    selectedDeckId?: string;
 }
 
 type ThemeMode = 'light' | 'sepia' | 'dark';
@@ -35,10 +37,10 @@ interface ReadingSettings {
     fontSize: FontSize;
 }
 
-export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalChunks, onComplete, onNext, onLookup, onContentUpdate, isLast }) => {
+export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalChunks, decks, onComplete, onNext, onLookup, onContentUpdate, isLast }) => {
   const [userTranslation, setUserTranslation] = useState('');
   const [selection, setSelection] = useState<SelectionState>({ 
-      text: '', top: 0, left: 0, show: false, loading: false, placement: 'top', isSaved: false
+      text: '', top: 0, left: 0, show: false, loading: false, placement: 'top', isSaved: false, selectedDeckId: decks[0]?.id
   });
   const textCardRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -62,9 +64,9 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
 
   useEffect(() => {
     setUserTranslation('');
-    setSelection({ text: '', top: 0, left: 0, show: false, loading: false, placement: 'top', isSaved: false });
+    setSelection({ text: '', top: 0, left: 0, show: false, loading: false, placement: 'top', isSaved: false, selectedDeckId: decks[0]?.id });
     setShowSettings(false);
-  }, [chunk.id]);
+  }, [chunk.id, decks]);
 
   const handleTextMouseUp = () => {
       const winSelection = window.getSelection();
@@ -73,7 +75,6 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
           return;
       }
       const text = winSelection.toString().trim();
-      // Giới hạn độ dài để tránh tra cứu cả đoạn văn dài
       if (text.length > 0 && text.split(/\s+/).length <= 15) {
           const range = winSelection.getRangeAt(0);
           const rect = range.getBoundingClientRect();
@@ -81,7 +82,11 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
           if (containerRect) {
             const placement = rect.top < 160 ? 'bottom' : 'top';
             let top = placement === 'top' ? rect.top - containerRect.top - 12 : rect.bottom - containerRect.top + 12;
-            setSelection({ text, top, left: rect.left - containerRect.left + (rect.width / 2), show: true, loading: true, placement, isSaved: false });
+            setSelection({ 
+                text, top, left: rect.left - containerRect.left + (rect.width / 2), 
+                show: true, loading: true, placement, isSaved: false, 
+                selectedDeckId: selection.selectedDeckId || decks[0]?.id 
+            });
             performLookup(text);
           }
       }
@@ -90,24 +95,29 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
   const performLookup = async (text: string) => {
       try {
           const result = await explainPhrase(text, chunk.text);
-          // Không gọi onLookup tự động nữa, chỉ lưu kết quả vào state để hiển thị
           setSelection(prev => (prev.text === text && prev.show) ? { ...prev, loading: false, result } : prev);
       } catch (e) {
           setSelection(prev => ({ ...prev, loading: false, show: false }));
       }
   };
 
-  const handleSaveCard = (e: React.MouseEvent) => {
+  const handleSaveCard = async (e: React.MouseEvent) => {
       e.stopPropagation();
       if (!selection.result || selection.isSaved) return;
+      if (!selection.selectedDeckId) {
+          alert("Vui lòng tạo ít nhất một bộ thẻ trước khi lưu!");
+          return;
+      }
       
-      onLookup(
+      const success = await onLookup(
           selection.text, 
           selection.result.shortMeaning, 
           selection.result.detailedExplanation, 
-          selection.result.phonetic
+          selection.result.phonetic,
+          selection.selectedDeckId
       );
-      setSelection(prev => ({ ...prev, isSaved: true }));
+      if (success) setSelection(prev => ({ ...prev, isSaved: true }));
+      else alert("Từ này đã tồn tại trong bộ thẻ đã chọn.");
   };
 
   const handleFinishChunk = () => {
@@ -130,12 +140,9 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
     <div className="max-w-7xl mx-auto w-full px-4 md:px-6 mb-12">
       <div className="bg-white rounded-[48px] shadow-2xl shadow-indigo-100/50 border border-slate-200 flex flex-col relative animate-in fade-in duration-500 overflow-hidden">
         
-        {/* HEADER SECTION */}
         <div className="px-10 py-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 backdrop-blur-md z-10">
              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-2xl border border-slate-100">
-                  ✍️
-                </div>
+                <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-2xl border border-slate-100">✍️</div>
                 <div>
                   <h2 className="text-sm font-black text-slate-900 uppercase tracking-[0.15em]">Luyện dịch chuyên sâu</h2>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">Bôi đen từ để tra cứu & Lưu thẻ vựng</p>
@@ -154,9 +161,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                                 <button onClick={() => updateSetting('fontFamily', 'font-serif')} className={`flex-1 py-2.5 rounded-xl text-xs font-serif font-bold transition-all ${settings.fontFamily === 'font-serif' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Serif</button>
                             </div>
                             <div className="mb-6">
-                                <div className="flex justify-between items-center mb-4">
-                                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cỡ chữ</span>
-                                </div>
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4">C cỡ chữ</span>
                                 <input type="range" min="0" max="4" step="1" value={['text-base', 'text-lg', 'text-xl', 'text-2xl', 'text-3xl'].indexOf(settings.fontSize)} onChange={(e) => updateSetting('fontSize', ['text-base', 'text-lg', 'text-xl', 'text-2xl', 'text-3xl'][parseInt(e.target.value)])} className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
                             </div>
                             <div>
@@ -173,57 +178,56 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
             </div>
         </div>
 
-        {/* MAIN WORKING AREA */}
         <div className={`flex-1 grid grid-cols-1 lg:grid-cols-2 lg:divide-x divide-slate-100 p-0`}>
-            
-            {/* LEFT: SOURCE TEXT */}
             <div className={`p-8 md:p-12 overflow-y-auto custom-scrollbar lg:sticky lg:top-0 lg:max-h-[calc(100vh-200px)]`}>
                 <div className="relative group" ref={textCardRef}>
                     <div className={`px-12 py-14 rounded-[40px] relative overflow-hidden transition-all duration-300 ${getThemeClasses()} border-2 min-h-[400px]`} onMouseUp={handleTextMouseUp} translate="no">
                         <div className="absolute left-0 top-0 bottom-0 w-2.5 bg-indigo-500/30"></div>
-                        <div className={`absolute top-6 right-10 text-[10px] font-black uppercase tracking-[0.3em] ${settings.theme === 'dark' ? 'text-slate-600' : 'text-slate-300'}`}>DOCUMENT</div>
-                        
                         <p className={`${settings.fontFamily} ${settings.fontSize} leading-[2.1] text-justify hyphens-auto break-words ${language === 'zh' ? 'tracking-widest' : 'tracking-normal'}`}>
                           {chunk.text}
                         </p>
                     </div>
 
-                    {/* Dictionary Lookup Tooltip */}
                     {selection.show && (
                         <div className={`absolute z-50 transform -translate-x-1/2 ${selection.placement === 'top' ? '-translate-y-full' : ''}`} style={{ top: selection.top, left: selection.left }}>
                              <div className="relative flex flex-col items-center">
                                 {selection.placement === 'bottom' && <div className={`w-3 h-3 rotate-45 transform translate-y-1.5 ${getSelectionColor()}`}></div>}
-                                <div className={`${getSelectionColor()} text-white rounded-[24px] shadow-2xl w-max min-w-[200px] max-w-[340px] px-6 py-5 text-left ring-8 ring-white/5 border border-white/10`}>
+                                <div className={`${getSelectionColor()} text-white rounded-[24px] shadow-2xl w-max min-w-[240px] max-w-[340px] px-6 py-5 text-left ring-8 ring-white/5 border border-white/10`}>
                                     {selection.loading ? 
-                                      <div className="flex items-center justify-center gap-3 text-xs font-black animate-pulse py-2">
-                                        <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"></div> 
-                                        ĐANG TRA TỪ...
-                                      </div> 
+                                      <div className="flex items-center justify-center gap-3 text-xs font-black animate-pulse py-4">Tra từ...</div> 
                                       : (
-                                        <div className="space-y-3">
-                                            <div className="flex justify-between items-start gap-4">
-                                                <div>
-                                                    <div className="text-xs font-black opacity-50 uppercase tracking-widest mb-1">{selection.text}</div>
-                                                    {selection.result?.phonetic && <div className="text-[10px] font-mono opacity-80">/{selection.result.phonetic}/</div>}
-                                                </div>
-                                                <button 
-                                                    onClick={handleSaveCard}
-                                                    disabled={selection.isSaved}
-                                                    className={`p-2 rounded-xl transition-all flex items-center gap-2 ${selection.isSaved ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}
-                                                    title={selection.isSaved ? "Đã lưu" : "Lưu vào bộ thẻ"}
-                                                >
-                                                    {selection.isSaved ? (
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                                                    ) : (
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                                                    )}
-                                                    <span className="text-[10px] font-black uppercase tracking-widest">{selection.isSaved ? "ĐÃ LƯU" : "LƯU THẺ"}</span>
-                                                </button>
+                                        <div className="space-y-4">
+                                            <div className="flex flex-col">
+                                                <div className="text-xs font-black opacity-50 uppercase tracking-widest mb-1">{selection.text}</div>
+                                                {selection.result?.phonetic && <div className="text-[10px] font-mono opacity-80">/{selection.result.phonetic}/</div>}
                                             </div>
                                             <div className="h-[1px] bg-white/10 w-full"></div>
-                                            <div className="text-sm font-bold whitespace-normal leading-relaxed">
-                                                {selection.result?.shortMeaning || "Không tìm thấy nghĩa."}
-                                            </div>
+                                            <div className="text-sm font-bold leading-relaxed">{selection.result?.shortMeaning}</div>
+                                            
+                                            {!selection.isSaved && (
+                                                <div className="pt-2 flex flex-col gap-3">
+                                                    <div className="space-y-1.5">
+                                                        <span className="text-[8px] font-black uppercase tracking-widest opacity-40">Chọn bộ thẻ để lưu:</span>
+                                                        <select 
+                                                            value={selection.selectedDeckId}
+                                                            onChange={(e) => setSelection(prev => ({ ...prev, selectedDeckId: e.target.value }))}
+                                                            className="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-[10px] font-bold text-white focus:outline-none focus:ring-2 focus:ring-white/30 appearance-none cursor-pointer"
+                                                        >
+                                                            {decks.map(d => <option key={d.id} value={d.id} className="text-slate-900">{d.name}</option>)}
+                                                            {decks.length === 0 && <option disabled>Chưa có bộ thẻ</option>}
+                                                        </select>
+                                                    </div>
+                                                    <button onClick={handleSaveCard} className="w-full py-3 bg-white text-indigo-600 font-black rounded-xl hover:bg-white/90 transition-all flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest">
+                                                        LƯU VÀO BỘ THẺ
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {selection.isSaved && (
+                                                <div className="py-2 flex items-center justify-center gap-2 bg-emerald-500/20 text-emerald-400 rounded-xl font-black text-[10px] uppercase tracking-widest">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                                    ĐÃ LƯU THÀNH CÔNG
+                                                </div>
+                                            )}
                                         </div>
                                       )
                                     }
@@ -235,7 +239,6 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                 </div>
             </div>
 
-            {/* RIGHT: EDITOR AREA */}
             <div className={`p-8 md:p-12 flex flex-col bg-white`}>
                 <div className="relative flex-1">
                     <div className="absolute -top-3 left-8 bg-white px-3 py-0.5 rounded-full border border-slate-100 z-10">
@@ -245,23 +248,17 @@ export const LessonView: React.FC<LessonViewProps> = ({ chunk, language, totalCh
                         ref={inputRef} 
                         value={userTranslation} 
                         onChange={(e) => setUserTranslation(e.target.value)} 
-                        placeholder="Ghi lại bản dịch hoặc ý tưởng của bạn tại đây..." 
-                        className={`w-full p-10 rounded-[40px] border-2 border-slate-100 bg-slate-50/20 focus:bg-white focus:border-indigo-500 focus:ring-8 focus:ring-indigo-500/5 transition-all text-xl leading-[1.8] placeholder:text-slate-300 min-h-[500px]`} 
+                        placeholder="Ghi lại bản dịch của bạn..." 
+                        className={`w-full p-10 rounded-[40px] border-2 border-slate-100 bg-slate-50/20 focus:bg-white focus:border-indigo-500 outline-none text-xl leading-[1.8] min-h-[500px] transition-all`} 
                     />
                 </div>
             </div>
         </div>
 
-        {/* FOOTER ACTION AREA */}
         <div className="px-10 py-10 bg-slate-50/80 border-t border-slate-100 flex flex-col items-center justify-center gap-6">
             <div className="w-full max-w-2xl text-center space-y-6">
-                <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Bạn đã hoàn thành phần luyện tập này?</p>
-                <button 
-                  onClick={handleFinishChunk} 
-                  className="w-full bg-indigo-600 text-white text-xl font-black py-7 rounded-[32px] shadow-2xl shadow-indigo-200 hover:bg-indigo-700 hover:scale-[1.02] transition-all active:scale-95 flex items-center justify-center gap-4"
-                >
-                    HOÀN THÀNH VÀ TIẾP TỤC
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                <button onClick={handleFinishChunk} className="w-full bg-indigo-600 text-white text-xl font-black py-7 rounded-[32px] shadow-2xl hover:bg-indigo-700 hover:scale-[1.02] transition-all active:scale-95 flex items-center justify-center gap-4">
+                    HOÀN THÀNH VÀ TIẾP TỤC →
                 </button>
             </div>
         </div>

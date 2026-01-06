@@ -4,8 +4,8 @@ import { Dashboard } from './components/Dashboard';
 import { AdminPanel } from './components/AdminPanel'; 
 import { FlashcardReview } from './components/FlashcardReview';
 import { LessonView } from './components/LessonView';
-import { Flashcard, ProcessedChunk, LessonContent } from './types';
-import { getDueFlashcards, setSyncKeyAndSync, saveFlashcard, getForgottenFlashcards } from './services/flashcardService';
+import { Flashcard, ProcessedChunk, LessonContent, Deck } from './types';
+import { getDueFlashcards, setSyncKeyAndSync, saveFlashcard, getForgottenFlashcards, getDecks } from './services/flashcardService';
 import { verifyStudentKey } from './services/firebaseService';
 import { clearAllFlashcardsFromDB } from './services/db';
 
@@ -16,6 +16,7 @@ const App: React.FC = () => {
   const [showAdmin, setShowAdmin] = useState(false);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [decks, setDecks] = useState<Deck[]>([]);
   
   // Lesson States
   const [currentLessonChunks, setCurrentLessonChunks] = useState<ProcessedChunk[]>([]);
@@ -33,17 +34,19 @@ const App: React.FC = () => {
         setSyncKey(storedKey);
         setIsSyncing(true);
         setSyncKeyAndSync(storedKey).then(() => {
-            updateTotalDueCount();
+            refreshAppData();
             setIsSyncing(false);
         });
     } else {
-        updateTotalDueCount();
+        refreshAppData();
     }
   }, []);
 
-  const updateTotalDueCount = async () => { 
+  const refreshAppData = async () => { 
       const due = await getDueFlashcards();
       setTotalDueCount(due.length);
+      const dList = await getDecks();
+      setDecks(dList);
   };
 
   const handleStartReview = async (deckId?: string) => {
@@ -90,7 +93,7 @@ const App: React.FC = () => {
       setSyncKey(key);
       localStorage.setItem('paperlingo_sync_key', key);
       await setSyncKeyAndSync(key); 
-      await updateTotalDueCount();
+      await refreshAppData();
       setIsSyncing(false);
   };
 
@@ -148,17 +151,18 @@ const App: React.FC = () => {
       setCurrentLessonChunks(prev => prev.map(c => c.id === id ? { ...c, content } : c));
   };
 
-  const handleAddFlashcard = async (term: string, meaning: string, explanation: string, phonetic: string) => {
-      const success = await saveFlashcard({ term, meaning, explanation, phonetic });
-      if (success) updateTotalDueCount();
+  const handleAddFlashcard = async (term: string, meaning: string, explanation: string, phonetic: string, deckId?: string) => {
+      const success = await saveFlashcard({ term, meaning, explanation, phonetic, deckId });
+      if (success) refreshAppData();
+      return success;
   };
 
   if (showReview && dueCards.length > 0) {
       return (
           <FlashcardReview 
               cards={dueCards} 
-              onClose={() => { setShowReview(false); updateTotalDueCount(); }} 
-              onUpdate={updateTotalDueCount} 
+              onClose={() => { setShowReview(false); refreshAppData(); }} 
+              onUpdate={refreshAppData} 
           />
       );
   }
@@ -168,7 +172,7 @@ const App: React.FC = () => {
       return (
           <div className="min-h-screen bg-slate-50 p-4 md:p-8 animate-in fade-in duration-500">
               <div className="max-w-7xl mx-auto mb-6 flex justify-between items-center px-4 md:px-6">
-                  <button onClick={() => setShowLesson(false)} className="px-4 py-2 bg-white rounded-xl shadow-sm border border-slate-200 text-slate-500 font-bold hover:text-slate-800 transition-all flex items-center gap-2 group">
+                  <button onClick={() => { setShowLesson(false); refreshAppData(); }} className="px-4 py-2 bg-white rounded-xl shadow-sm border border-slate-200 text-slate-500 font-bold hover:text-slate-800 transition-all flex items-center gap-2 group">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="group-hover:-translate-x-1 transition-transform"><path d="m15 18-6-6 6-6"/></svg>
                     Trở về Dashboard
                   </button>
@@ -183,6 +187,7 @@ const App: React.FC = () => {
                   chunk={currentChunk}
                   totalChunks={currentLessonChunks.length}
                   language={lessonLanguage}
+                  decks={decks}
                   onComplete={() => {}}
                   onNext={() => setCurrentChunkIndex(prev => Math.min(prev + 1, currentLessonChunks.length - 1))}
                   onLookup={handleAddFlashcard}
